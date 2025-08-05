@@ -1,5 +1,15 @@
 package repositories
 
+// TODO: Transition State: JSON → PostgreSQL
+// DEPRECATED: This entire file-based repository implementation should be replaced
+// with PostgreSQL-backed repository. Key changes needed:
+// 1. Replace map[string]*models.MenuItem with database connection
+// 2. Replace JSON file operations with SQL queries for menu_items table
+// 3. Remove file I/O operations (loadFromFile, saveToFile, backupFile)
+// 4. Replace sync.RWMutex with database transaction handling
+// 5. Convert dataFilePath to database connection dependency
+// 6. Implement proper SQL schema for menu_items table with ingredients relationship
+
 import (
 	"encoding/json"
 	"errors"
@@ -14,6 +24,8 @@ import (
 	"hot-coffee/pkg/logger"
 )
 
+// TODO: Transition State: JSON → PostgreSQL
+// DEPRECATED: Interface remains the same but implementation changes from JSON to SQL
 type MenuRepositoryInterface interface {
 	GetAll() ([]*models.MenuItem, error)
 	Create(item *models.MenuItem) error
@@ -22,20 +34,26 @@ type MenuRepositoryInterface interface {
 	GetByID(id string) (*models.MenuItem, error)
 }
 
+// TODO: Transition State: JSON → PostgreSQL
+// DEPRECATED: Replace this struct with PostgreSQL connection
+// New struct should contain *database.DB instead of map and file operations
 type MenuRepository struct {
-	items        map[string]*models.MenuItem
-	mutex        sync.RWMutex
+	items        map[string]*models.MenuItem // TODO: Replace with database.DB
+	mutex        sync.RWMutex                // TODO: Remove (database handles this)
 	logger       *logger.Logger
-	dataFilePath string
-	loaded       bool
+	dataFilePath string // TODO: Remove (no more file operations)
+	loaded       bool   // TODO: Remove (no more file loading)
 }
 
+// TODO: Transition State: JSON → PostgreSQL
+// DEPRECATED: Replace constructor to accept database connection instead of dataDir
+// New signature: NewMenuRepository(logger *logger.Logger, db *database.DB) *MenuRepository
 func NewMenuRepository(logger *logger.Logger, dataDir string) *MenuRepository {
 	return &MenuRepository{
-		items:        make(map[string]*models.MenuItem),
+		items:        make(map[string]*models.MenuItem), // TODO: Remove
 		logger:       logger.WithComponent("menu_repository"),
-		dataFilePath: filepath.Join(dataDir, "menu_items.json"),
-		loaded:       false,
+		dataFilePath: filepath.Join(dataDir, "menu_items.json"), // TODO: Remove
+		loaded:       false,                                      // TODO: Remove
 	}
 }
 
@@ -193,6 +211,13 @@ func (r *MenuRepository) GetByID(id string) (*models.MenuItem, error) {
 // - Count item frequencies
 // - Return sorted popular items
 // func (r *MenuRepository) GetPopularItems() ([]*models.PopularItemAggregation, error)
+
+// TODO: Transition State: JSON → PostgreSQL
+// DEPRECATED: All file operations below should be removed and replaced with SQL queries
+// - loadFromFile() → SELECT queries for menu_items table with ingredient joins
+// - saveToFile() → INSERT/UPDATE queries with transactions for menu_items
+// - backupFile() → Database backup strategies
+// - validateMenuItem() → Database constraints and validation
 
 func (r *MenuRepository) loadFromFile() error {
 	if err := os.MkdirAll(filepath.Dir(r.dataFilePath), 0o755); err != nil {

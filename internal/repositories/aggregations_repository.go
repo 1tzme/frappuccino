@@ -1,5 +1,13 @@
 package repositories
 
+// TODO: Transition State: JSON → PostgreSQL
+// DEPRECATED: Replace in-memory data aggregation with SQL-based queries
+// 1. Implement JOIN queries to aggregate data across orders and menu_items tables
+// 2. Create database views for common aggregation patterns
+// 3. Replace manual data fetching with optimized SQL aggregate functions
+// 4. Add proper database indexing for performance optimization
+// 5. Implement database-specific reporting features (window functions, CTEs)
+
 import (
 	"hot-coffee/models"
 	"hot-coffee/pkg/logger"

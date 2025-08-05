@@ -1,5 +1,13 @@
 package service
 
+// TODO: Transition State: JSON → PostgreSQL
+// DEPRECATED: Replace in-memory aggregation logic with SQL-based reporting
+// 1. Implement SQL aggregate functions (SUM, COUNT, GROUP BY) for sales reports
+// 2. Create database views for complex reporting queries
+// 3. Add database-based analytics and business intelligence features
+// 4. Replace manual data processing with stored procedures
+// 5. Implement efficient pagination and filtering for large datasets
+
 import (
 	"sort"
 

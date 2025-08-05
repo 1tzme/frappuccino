@@ -1,5 +1,13 @@
 package handler
 
+// TODO: Transition State: JSON → PostgreSQL
+// DEPRECATED: Update error handling for PostgreSQL integration
+// 1. Handle database constraint violations (foreign key, unique constraints)
+// 2. Implement proper transaction error handling for order operations
+// 3. Add database connection timeout and retry logic
+// 4. Replace file I/O error responses with database-specific error messages
+// 5. Update HTTP status codes for database operation failures
+
 import (
 	"encoding/json"
 	"fmt"

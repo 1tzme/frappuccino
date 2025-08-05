@@ -1,5 +1,16 @@
 package main
 
+// TODO: Transition State: JSON → PostgreSQL
+// DEPRECATED: Replace JSON-based repositories with PostgreSQL-backed repositories
+// 1. Initialize database connection using pkg/database/connection.go
+// 2. Replace orderRepo := repositories.NewOrderRepository(appLogger, flagConfig.DataDir)
+//    with orderRepo := repositories.NewOrderRepository(appLogger, db)
+// 3. Replace menuRepo := repositories.NewMenuRepository(appLogger, flagConfig.DataDir)
+//    with menuRepo := repositories.NewMenuRepository(appLogger, db)
+// 4. Replace inventoryRepo := repositories.NewInventoryRepository(appLogger, flagConfig.DataDir)
+//    with inventoryRepo := repositories.NewInventoryRepository(appLogger, db)
+// 5. Remove flagConfig.DataDir dependency entirely
+
 import (
 	"fmt"
 	"net/http"

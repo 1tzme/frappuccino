@@ -1,5 +1,15 @@
 package repositories
 
+// TODO: Transition State: JSON → PostgreSQL
+// DEPRECATED: This entire file-based repository implementation should be replaced
+// with PostgreSQL-backed repository. Key changes needed:
+// 1. Replace map[string]*models.Order with database connection
+// 2. Replace JSON file operations with SQL queries (SELECT, INSERT, UPDATE, DELETE)
+// 3. Remove file I/O operations (loadFromFile, saveToFile, backupFile)
+// 4. Replace sync.RWMutex with database transaction handling
+// 5. Convert dataFilePath to database connection dependency
+// 6. Implement proper SQL schema for orders table with relationships
+
 import (
 	"encoding/json"
 	"errors"
@@ -14,7 +24,9 @@ import (
 	"hot-coffee/pkg/logger"
 )
 
-// OrderRepository interface
+// TODO: Transition State: JSON → PostgreSQL
+// DEPRECATED: Replace with PostgreSQL-backed repository interface
+// Interface should remain the same but implementation will change from JSON files to SQL operations
 type OrderRepositoryInterface interface {
 	GetAll() ([]*models.Order, error)
 	GetByID(id string) (*models.Order, error)
@@ -24,22 +36,30 @@ type OrderRepositoryInterface interface {
 	CloseOrder(id string) error
 }
 
-// OrderRepository struct
+// TODO: Transition State: JSON → PostgreSQL
+// DEPRECATED: Replace this struct with PostgreSQL connection
+// New struct should contain:
+// - *database.DB instead of map and file operations
+// - Remove mutex (database handles concurrency)
+// - Remove dataFilePath and loaded fields
 type OrderRepository struct {
-	orders       map[string]*models.Order
-	mutex        sync.RWMutex
+	orders       map[string]*models.Order // TODO: Replace with database.DB
+	mutex        sync.RWMutex            // TODO: Remove (database handles this)
 	logger       *logger.Logger
-	dataFilePath string
-	loaded       bool
+	dataFilePath string // TODO: Remove (no more file operations)
+	loaded       bool   // TODO: Remove (no more file loading)
 }
 
-// NewOrderRepository creates a new OrderRepository with the given logger and data directory
+// TODO: Transition State: JSON → PostgreSQL
+// DEPRECATED: Replace constructor to accept database connection instead of dataDir
+// New signature: NewOrderRepository(logger *logger.Logger, db *database.DB) *OrderRepository
+// Remove file path initialization, add database connection
 func NewOrderRepository(logger *logger.Logger, dataDir string) *OrderRepository {
 	return &OrderRepository{
-		orders:       make(map[string]*models.Order),
+		orders:       make(map[string]*models.Order), // TODO: Remove
 		logger:       logger.WithComponent("order_repository"),
-		dataFilePath: filepath.Join(dataDir, "orders.json"),
-		loaded:       false,
+		dataFilePath: filepath.Join(dataDir, "orders.json"), // TODO: Remove
+		loaded:       false,                                  // TODO: Remove
 	}
 }
 
@@ -220,6 +240,13 @@ func (r *OrderRepository) CloseOrder(id string) error {
 	r.logger.Info("Closed order", "order_id", id)
 	return nil
 }
+
+// TODO: Transition State: JSON → PostgreSQL
+// DEPRECATED: All file operations below should be removed and replaced with SQL queries
+// - loadFromFile() → SELECT queries with proper table joins
+// - saveToFile() → INSERT/UPDATE queries with transactions
+// - backupFile() → Database backup strategies (pg_dump, WAL archiving)
+// - validateOrder() → Database constraints and triggers
 
 // loadFromFile loads orders from JSON file
 func (r *OrderRepository) loadFromFile() error {

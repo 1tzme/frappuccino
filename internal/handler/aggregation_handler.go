@@ -1,5 +1,13 @@
 package handler
 
+// TODO: Transition State: JSON → PostgreSQL
+// DEPRECATED: Update aggregation handling for PostgreSQL-based data operations
+// 1. Replace in-memory aggregation logic with SQL aggregate queries
+// 2. Implement database view-based reports for better performance
+// 3. Add proper database error handling for aggregation operations
+// 4. Update response format to handle database query results efficiently
+// 5. Implement database-specific optimization for reporting queries
+
 import (
 	"net/http"
 
