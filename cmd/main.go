@@ -41,14 +41,11 @@ func main() {
 	envErr := envconfig.LoadEnvFile(".env")
 
 	loggerConfig := logger.Config{
-		Level:         envconfig.GetLogLevel(),
-		Format:        envconfig.GetEnv("LOG_FORMAT", "json"),
-		Output:        envconfig.GetEnv("LOG_OUTPUT", "stdout"),
-		EnableCaller:  envconfig.GetEnv("LOG_ENABLE_CALLER", "true") == "true",
-		EnableColors:  envconfig.GetEnv("LOG_ENABLE_COLORS", "false") == "true",
-		Environment:   envconfig.GetEnv("ENVIRONMENT", "development"),
-		EnableMetrics: true,
-		SensitiveKeys: []string{"password", "token", "secret", "key", "authorization"}, // abstract for now
+		Level:        envconfig.GetLogLevel(),
+		Format:       envconfig.GetEnv("LOG_FORMAT", "json"),
+		Output:       envconfig.GetEnv("LOG_OUTPUT", "stdout"),
+		EnableCaller: envconfig.GetEnv("LOG_ENABLE_CALLER", "true") == "true",
+		Environment:  envconfig.GetEnv("ENVIRONMENT", "development"),
 	}
 
 	appLogger := logger.New(loggerConfig)
@@ -65,7 +62,7 @@ func main() {
 
 	// TODO: Transition State: JSON → PostgreSQL
 	// Initialize database connection to replace JSON file storage
-	
+
 	// Parse database port with default value
 	dbPort := 5432
 	if portStr := envconfig.GetEnv("DB_PORT", "5432"); portStr != "" {
@@ -93,7 +90,7 @@ func main() {
 		db = nil
 	} else {
 		appLogger.Info("Database connection established successfully")
-		
+
 		// Perform initial health check
 		if err := db.HealthCheck(); err != nil {
 			appLogger.Error("Database health check failed", "error", err)
@@ -103,7 +100,7 @@ func main() {
 		} else {
 			appLogger.Info("Database health check passed")
 		}
-		
+
 		// Ensure database connection is closed on shutdown
 		if db != nil {
 			defer func() {

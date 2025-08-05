@@ -3,7 +3,6 @@ package logger
 import (
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"path/filepath"
 	"runtime"
@@ -11,24 +10,9 @@ import (
 	"time"
 )
 
-// contains checks if a slice contains a string
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
-}
-
 // generateRequestID generates a simple request ID
 func generateRequestID() string {
 	return fmt.Sprintf("%d", time.Now().UnixNano())
-}
-
-// NewConsoleHandler creates a custom console handler (simplified)
-func NewConsoleHandler(w io.Writer, opts *slog.HandlerOptions, enableColors bool) slog.Handler {
-	return slog.NewTextHandler(w, opts)
 }
 
 // customSourceHandler wraps a handler to fix source attribution
