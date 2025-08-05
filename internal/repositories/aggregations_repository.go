@@ -9,8 +9,8 @@ package repositories
 // 5. Implement database-specific reporting features (window functions, CTEs)
 
 import (
-	"hot-coffee/models"
-	"hot-coffee/pkg/logger"
+	"frappuccino/models"
+	"frappuccino/pkg/logger"
 )
 
 type AggregationRepositoryInterface interface {

@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"time"
 
-	"hot-coffee/pkg/database"
+	"frappuccino/pkg/database"
 )
 
 // LoadDatabaseConfig loads database configuration from environment variables

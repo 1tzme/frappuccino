@@ -11,8 +11,8 @@ package handler
 import (
 	"net/http"
 
-	"hot-coffee/internal/service"
-	"hot-coffee/pkg/logger"
+	"frappuccino/internal/service"
+	"frappuccino/pkg/logger"
 )
 
 type AggregationHandler struct {

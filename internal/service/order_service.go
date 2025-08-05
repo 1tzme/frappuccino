@@ -14,9 +14,9 @@ import (
 	"strings"
 	"time"
 
-	"hot-coffee/internal/repositories"
-	"hot-coffee/models"
-	"hot-coffee/pkg/logger"
+	"frappuccino/internal/repositories"
+	"frappuccino/models"
+	"frappuccino/pkg/logger"
 )
 
 // Define request/response structs

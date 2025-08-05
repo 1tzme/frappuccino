@@ -1,4 +1,4 @@
-module hot-coffee
+module frappuccino
 
 go 1.21
 

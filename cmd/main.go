@@ -17,15 +17,15 @@ import (
 	"strings"
 	"time"
 
-	"hot-coffee/internal/handler"
-	"hot-coffee/internal/repositories"
-	"hot-coffee/internal/router"
-	"hot-coffee/internal/service"
-	"hot-coffee/pkg/database"
-	"hot-coffee/pkg/envconfig"
-	"hot-coffee/pkg/flags"
-	"hot-coffee/pkg/logger"
-	"hot-coffee/pkg/shutdownsetup"
+	"frappuccino/internal/handler"
+	"frappuccino/internal/repositories"
+	"frappuccino/internal/router"
+	"frappuccino/internal/service"
+	"frappuccino/pkg/database"
+	"frappuccino/pkg/envconfig"
+	"frappuccino/pkg/flags"
+	"frappuccino/pkg/logger"
+	"frappuccino/pkg/shutdownsetup"
 )
 
 func main() {

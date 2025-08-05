@@ -16,8 +16,8 @@ import (
 	"strings"
 	"time"
 
-	"hot-coffee/internal/service"
-	"hot-coffee/pkg/logger"
+	"frappuccino/internal/service"
+	"frappuccino/pkg/logger"
 )
 
 // OrderHandler struct

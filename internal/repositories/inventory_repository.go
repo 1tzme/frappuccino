@@ -20,8 +20,8 @@ import (
 	"sync"
 	"time"
 
-	"hot-coffee/models"
-	"hot-coffee/pkg/logger"
+	"frappuccino/models"
+	"frappuccino/pkg/logger"
 )
 
 // TODO: Transition State: JSON → PostgreSQL
@@ -135,7 +135,7 @@ func NewInventoryRepository(logger *logger.Logger, dataDir string) *InventoryRep
 		items:        make(map[string]*models.InventoryItem), // TODO: Remove
 		logger:       logger.WithComponent("inventory_repository"),
 		dataFilePath: filepath.Join(dataDir, "inventory.json"), // TODO: Remove
-		loaded:       false,                                     // TODO: Remove
+		loaded:       false,                                    // TODO: Remove
 	}
 }
 

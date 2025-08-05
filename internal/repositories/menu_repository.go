@@ -20,8 +20,8 @@ import (
 	"sync"
 	"time"
 
-	"hot-coffee/models"
-	"hot-coffee/pkg/logger"
+	"frappuccino/models"
+	"frappuccino/pkg/logger"
 )
 
 // TODO: Transition State: JSON → PostgreSQL
@@ -53,7 +53,7 @@ func NewMenuRepository(logger *logger.Logger, dataDir string) *MenuRepository {
 		items:        make(map[string]*models.MenuItem), // TODO: Remove
 		logger:       logger.WithComponent("menu_repository"),
 		dataFilePath: filepath.Join(dataDir, "menu_items.json"), // TODO: Remove
-		loaded:       false,                                      // TODO: Remove
+		loaded:       false,                                     // TODO: Remove
 	}
 }
 

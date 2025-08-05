@@ -20,8 +20,8 @@ import (
 	"sync"
 	"time"
 
-	"hot-coffee/models"
-	"hot-coffee/pkg/logger"
+	"frappuccino/models"
+	"frappuccino/pkg/logger"
 )
 
 // TODO: Transition State: JSON → PostgreSQL
@@ -44,7 +44,7 @@ type OrderRepositoryInterface interface {
 // - Remove dataFilePath and loaded fields
 type OrderRepository struct {
 	orders       map[string]*models.Order // TODO: Replace with database.DB
-	mutex        sync.RWMutex            // TODO: Remove (database handles this)
+	mutex        sync.RWMutex             // TODO: Remove (database handles this)
 	logger       *logger.Logger
 	dataFilePath string // TODO: Remove (no more file operations)
 	loaded       bool   // TODO: Remove (no more file loading)
@@ -59,7 +59,7 @@ func NewOrderRepository(logger *logger.Logger, dataDir string) *OrderRepository 
 		orders:       make(map[string]*models.Order), // TODO: Remove
 		logger:       logger.WithComponent("order_repository"),
 		dataFilePath: filepath.Join(dataDir, "orders.json"), // TODO: Remove
-		loaded:       false,                                  // TODO: Remove
+		loaded:       false,                                 // TODO: Remove
 	}
 }
 

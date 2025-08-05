@@ -8,7 +8,7 @@ import (
 	"syscall"
 	"time"
 
-	"hot-coffee/pkg/logger"
+	"frappuccino/pkg/logger"
 )
 
 // SetupGracefulShutdown handles graceful server shutdown

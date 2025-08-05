@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"hot-coffee/pkg/logger"
+	"frappuccino/pkg/logger"
 
 	_ "github.com/lib/pq"
 )
