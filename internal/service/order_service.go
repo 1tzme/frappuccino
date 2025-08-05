@@ -1,5 +1,13 @@
 package service
 
+// TODO: Transition State: JSON → PostgreSQL
+// DEPRECATED: Update order business logic for PostgreSQL integration
+// 1. Implement database transaction management for multi-table order operations
+// 2. Replace in-memory validation with database constraint enforcement
+// 3. Add proper handling of database foreign key relationships
+// 4. Update order processing to use database triggers and stored procedures
+// 5. Implement database-based inventory tracking and order fulfillment
+
 import (
 	"fmt"
 	"strconv"

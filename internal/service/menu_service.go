@@ -1,5 +1,13 @@
 package service
 
+// TODO: Transition State: JSON → PostgreSQL
+// DEPRECATED: Update menu business logic for PostgreSQL database operations
+// 1. Replace file-based menu validation with database constraints
+// 2. Implement proper transaction handling for menu item operations
+// 3. Add database relationship management for menu items and ingredients
+// 4. Update availability logic to use database triggers and views
+// 5. Implement database-based menu categorization and search features
+
 import (
 	"fmt"
 

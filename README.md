@@ -4,6 +4,50 @@
 
 Hot Coffee is a coffee shop management system built with Go using a three-layered architecture pattern. The application provides HTTP endpoints for managing orders, menu items, and inventory with data persistence in JSON files.
 
+<!-- TODO: Transition State: JSON → PostgreSQL -->
+<!-- DEPRECATED: Update project description to reflect PostgreSQL database integration -->
+<!-- Current: "data persistence in JSON files" -->
+<!-- Future: "data persistence in PostgreSQL database" -->
+
+## TODO: Transition State: JSON → PostgreSQL
+
+**PRIORITY**: Migrate from JSON file-based storage to PostgreSQL database
+
+### Migration Checklist:
+
+#### 1. Database Setup
+- [ ] Create PostgreSQL database schema
+- [ ] Implement table creation scripts (orders, menu_items, inventory_items, order_items)
+- [ ] Add database relationships and constraints
+- [ ] Create database indexes for performance
+
+#### 2. Repository Layer Migration
+- [ ] Update OrderRepository to use database connection instead of JSON files
+- [ ] Update MenuRepository to use SQL queries instead of file operations
+- [ ] Update InventoryRepository to use database operations
+- [ ] Remove all file I/O operations (loadFromFile, saveToFile, backupFile)
+
+#### 3. Service Layer Updates
+- [ ] Update error handling for database-specific errors
+- [ ] Implement database transaction management
+- [ ] Add database connection retry logic
+- [ ] Update business logic to leverage database features
+
+#### 4. Handler Layer Updates  
+- [ ] Update HTTP error responses for database errors
+- [ ] Add proper handling of database constraint violations
+- [ ] Implement database timeout handling
+
+#### 5. Model Updates
+- [ ] Add database column mappings (`db` tags)
+- [ ] Update timestamp fields to use time.Time
+- [ ] Implement proper database relationships
+
+#### 6. Configuration & Documentation
+- [ ] Update environment configuration for database connection
+- [ ] Replace JSON storage documentation with database documentation
+- [ ] Add database migration and setup instructions
+
 ## Commit Message Format
 
 ```

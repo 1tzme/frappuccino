@@ -1,5 +1,13 @@
 package handler
 
+// TODO: Transition State: JSON → PostgreSQL
+// DEPRECATED: Update error handling for PostgreSQL database operations
+// 1. Handle database constraint violations for menu item operations
+// 2. Implement proper transaction management for menu updates
+// 3. Add database-specific error handling and logging
+// 4. Replace file-based error scenarios with database error handling
+// 5. Update HTTP response codes for database operation results
+
 import (
 	"net/http"
 	"regexp"

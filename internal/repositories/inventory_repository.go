@@ -1,11 +1,14 @@
 package repositories
 
-// TODO: Add imports when implementing:
-// import (
-//     "sync"
-//     "hot-coffee/models"
-//     "hot-coffee/pkg/logger"
-// )
+// TODO: Transition State: JSON → PostgreSQL
+// DEPRECATED: This entire file-based repository implementation should be replaced
+// with PostgreSQL-backed repository. Key changes needed:
+// 1. Replace map[string]*models.InventoryItem with database connection
+// 2. Replace JSON file operations with SQL queries for inventory_items table
+// 3. Remove file I/O operations (loadFromFile, saveToFile, backupFile)
+// 4. Replace sync.RWMutex with database transaction handling
+// 5. Convert dataFilePath to database connection dependency
+// 6. Implement proper SQL schema for inventory_items table
 
 import (
 	"encoding/json"
@@ -21,7 +24,8 @@ import (
 	"hot-coffee/pkg/logger"
 )
 
-// TODO: Implement InventoryRepository interface
+// TODO: Transition State: JSON → PostgreSQL
+// DEPRECATED: Interface remains the same but implementation changes from JSON to SQL
 type InventoryRepositoryInterface interface {
 	GetAll() ([]*models.InventoryItem, error)
 	Update(id string, item *models.InventoryItem) error
@@ -112,20 +116,26 @@ func (r *InventoryRepository) Delete(id string) error {
 	return nil
 }
 
+// TODO: Transition State: JSON → PostgreSQL
+// DEPRECATED: Replace this struct with PostgreSQL connection
+// New struct should contain *database.DB instead of map and file operations
 type InventoryRepository struct {
-	items        map[string]*models.InventoryItem
-	mutex        sync.RWMutex
+	items        map[string]*models.InventoryItem // TODO: Replace with database.DB
+	mutex        sync.RWMutex                     // TODO: Remove (database handles this)
 	logger       *logger.Logger
-	dataFilePath string
-	loaded       bool
+	dataFilePath string // TODO: Remove (no more file operations)
+	loaded       bool   // TODO: Remove (no more file loading)
 }
 
+// TODO: Transition State: JSON → PostgreSQL
+// DEPRECATED: Replace constructor to accept database connection instead of dataDir
+// New signature: NewInventoryRepository(logger *logger.Logger, db *database.DB) *InventoryRepository
 func NewInventoryRepository(logger *logger.Logger, dataDir string) *InventoryRepository {
 	return &InventoryRepository{
-		items:        make(map[string]*models.InventoryItem),
+		items:        make(map[string]*models.InventoryItem), // TODO: Remove
 		logger:       logger.WithComponent("inventory_repository"),
-		dataFilePath: filepath.Join(dataDir, "inventory.json"),
-		loaded:       false,
+		dataFilePath: filepath.Join(dataDir, "inventory.json"), // TODO: Remove
+		loaded:       false,                                     // TODO: Remove
 	}
 }
 

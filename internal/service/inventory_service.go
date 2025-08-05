@@ -1,5 +1,13 @@
 package service
 
+// TODO: Transition State: JSON → PostgreSQL
+// DEPRECATED: Update business logic to work with PostgreSQL repositories
+// 1. Update validation logic to work with database constraints
+// 2. Implement proper transaction handling for complex inventory operations
+// 3. Add database-specific error handling and retry logic
+// 4. Replace file-based concurrency handling with database transaction isolation
+// 5. Update business rules to leverage database features (triggers, constraints)
+
 import (
 	"fmt"
 
