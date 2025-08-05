@@ -2,7 +2,6 @@ package main
 
 // TODO: Transition State: JSON → PostgreSQL
 // DEPRECATED: Replace JSON-based repositories with PostgreSQL-backed repositories
-// 1. Initialize database connection using pkg/database/connection.go
 // 2. Replace orderRepo := repositories.NewOrderRepository(appLogger, flagConfig.DataDir)
 //    with orderRepo := repositories.NewOrderRepository(appLogger, db)
 // 3. Replace menuRepo := repositories.NewMenuRepository(appLogger, flagConfig.DataDir)
@@ -14,6 +13,7 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +21,7 @@ import (
 	"hot-coffee/internal/repositories"
 	"hot-coffee/internal/router"
 	"hot-coffee/internal/service"
+	"hot-coffee/pkg/database"
 	"hot-coffee/pkg/envconfig"
 	"hot-coffee/pkg/flags"
 	"hot-coffee/pkg/logger"
@@ -62,7 +63,59 @@ func main() {
 		"environment", loggerConfig.Environment,
 		"log_level", loggerConfig.Level)
 
+	// TODO: Transition State: JSON → PostgreSQL
+	// Initialize database connection to replace JSON file storage
+	
+	// Parse database port with default value
+	dbPort := 5432
+	if portStr := envconfig.GetEnv("DB_PORT", "5432"); portStr != "" {
+		if parsedPort, err := strconv.Atoi(portStr); err == nil {
+			dbPort = parsedPort
+		}
+	}
+
+	dbConfig := database.Config{
+		Host:     envconfig.GetEnv("DB_HOST", "localhost"),
+		Port:     dbPort,
+		User:     envconfig.GetEnv("DB_USER", "postgres"),
+		Password: envconfig.GetEnv("DB_PASSWORD", ""),
+		DBName:   envconfig.GetEnv("DB_NAME", "hotcoffee"),
+		SSLMode:  envconfig.GetEnv("DB_SSL_MODE", "disable"),
+		// Use default connection pool settings from database package
+	}
+
+	// Establish database connection
+	db, err := database.NewConnection(dbConfig, appLogger)
+	if err != nil {
+		appLogger.Error("Failed to establish database connection", "error", err)
+		// For now, fall back to JSON storage during transition
+		appLogger.Warn("Falling back to JSON storage during transition period")
+		db = nil
+	} else {
+		appLogger.Info("Database connection established successfully")
+		
+		// Perform initial health check
+		if err := db.HealthCheck(); err != nil {
+			appLogger.Error("Database health check failed", "error", err)
+			appLogger.Warn("Continuing with JSON storage due to database health issues")
+			db.Close()
+			db = nil
+		} else {
+			appLogger.Info("Database health check passed")
+		}
+		
+		// Ensure database connection is closed on shutdown
+		if db != nil {
+			defer func() {
+				if err := db.Close(); err != nil {
+					appLogger.Error("Failed to close database connection", "error", err)
+				}
+			}()
+		}
+	}
+
 	// Initialize repositories with logger and data directory from flags
+	// TODO: Transition State: JSON → PostgreSQL - Replace these with database-backed repositories
 	orderRepo := repositories.NewOrderRepository(appLogger, flagConfig.DataDir)
 	menuRepo := repositories.NewMenuRepository(appLogger, flagConfig.DataDir)
 	inventoryRepo := repositories.NewInventoryRepository(appLogger, flagConfig.DataDir)
