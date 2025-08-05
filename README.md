@@ -16,7 +16,7 @@ Hot Coffee is a coffee shop management system built with Go using a three-layere
 ### Migration Checklist:
 
 #### 1. Database Setup
-- [ ] Create PostgreSQL database schema
+- [+] Create PostgreSQL database schema
 - [ ] Implement table creation scripts (orders, menu_items, inventory_items, order_items)
 - [ ] Add database relationships and constraints
 - [ ] Create database indexes for performance
