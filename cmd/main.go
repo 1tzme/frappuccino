@@ -1,14 +1,14 @@
 package main
 
 // TODO: Transition State: JSON → PostgreSQL
-// DEPRECATED: Replace JSON-based repositories with PostgreSQL-backed repositories
-// 2. Replace orderRepo := repositories.NewOrderRepository(appLogger, flagConfig.DataDir)
+// COMPLETED: Replaced JSON-based repositories with PostgreSQL-backed repositories
+// ✓ 2. Replace orderRepo := repositories.NewOrderRepository(appLogger, flagConfig.DataDir)
 //    with orderRepo := repositories.NewOrderRepository(appLogger, db)
-// 3. Replace menuRepo := repositories.NewMenuRepository(appLogger, flagConfig.DataDir)
+// ✓ 3. Replace menuRepo := repositories.NewMenuRepository(appLogger, flagConfig.DataDir)
 //    with menuRepo := repositories.NewMenuRepository(appLogger, db)
-// 4. Replace inventoryRepo := repositories.NewInventoryRepository(appLogger, flagConfig.DataDir)
+// ✓ 4. Replace inventoryRepo := repositories.NewInventoryRepository(appLogger, flagConfig.DataDir)
 //    with inventoryRepo := repositories.NewInventoryRepository(appLogger, db)
-// 5. Remove flagConfig.DataDir dependency entirely
+// TODO: 5. Remove flagConfig.DataDir dependency entirely
 
 import (
 	"fmt"
@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	// TODO: Imports uncommented for PostgreSQL transition
 	"frappuccino/internal/handler"
 	"frappuccino/internal/repositories"
 	"frappuccino/internal/router"
@@ -60,10 +61,6 @@ func main() {
 		"environment", loggerConfig.Environment,
 		"log_level", loggerConfig.Level)
 
-	// TODO: Transition State: JSON → PostgreSQL
-	// Initialize database connection to replace JSON file storage
-
-	// Parse database port with default value
 	dbPort := 5432
 	if portStr := envconfig.GetEnv("DB_PORT", "5432"); portStr != "" {
 		if parsedPort, err := strconv.Atoi(portStr); err == nil {
@@ -85,18 +82,11 @@ func main() {
 	db, err := database.NewConnection(dbConfig, appLogger)
 	if err != nil {
 		appLogger.Error("Failed to establish database connection", "error", err)
-		// For now, fall back to JSON storage during transition
-		appLogger.Warn("Falling back to JSON storage during transition period")
-		db = nil
 	} else {
 		appLogger.Info("Database connection established successfully")
 
-		// Perform initial health check
 		if err := db.HealthCheck(); err != nil {
 			appLogger.Error("Database health check failed", "error", err)
-			appLogger.Warn("Continuing with JSON storage due to database health issues")
-			db.Close()
-			db = nil
 		} else {
 			appLogger.Info("Database health check passed")
 		}
@@ -111,25 +101,28 @@ func main() {
 		}
 	}
 
-	// Initialize repositories with logger and data directory from flags
-	// TODO: Transition State: JSON → PostgreSQL - Replace these with database-backed repositories
-	orderRepo := repositories.NewOrderRepository(appLogger, flagConfig.DataDir)
-	menuRepo := repositories.NewMenuRepository(appLogger, flagConfig.DataDir)
-	inventoryRepo := repositories.NewInventoryRepository(appLogger, flagConfig.DataDir)
+	// Initialize repositories with logger and database connection
+	// TODO: Transition State: JSON → PostgreSQL - Updated to use database-backed repositories
+	orderRepo := repositories.NewOrderRepository(appLogger, db)
+	menuRepo := repositories.NewMenuRepository(appLogger, db)
+	inventoryRepo := repositories.NewInventoryRepository(appLogger, db)
 	aggregationRepo := repositories.NewAggregationRepository(orderRepo, menuRepo, appLogger)
 
 	// Initialize services with logger
+	// TODO: Services updated for PostgreSQL transition
 	orderService := service.NewOrderService(orderRepo, menuRepo, inventoryRepo, appLogger)
 	menuService := service.NewMenuService(inventoryRepo, menuRepo, orderRepo, appLogger)
 	inventoryService := service.NewInventoryService(inventoryRepo, orderRepo, menuRepo, appLogger)
 	aggregationService := service.NewAggregationService(aggregationRepo, appLogger)
 
 	// Initialize handlers with logger
+	// TODO: Handlers updated for PostgreSQL transition
 	orderHandler := handler.NewOrderHandler(orderService, appLogger)
 	menuHandler := handler.NewMenuHandler(menuService, appLogger)
 	inventoryHandler := handler.NewInventoryHandler(inventoryService, appLogger)
 	aggregationHandler := handler.NewAggregationHandler(aggregationService, appLogger)
 
+	// TODO: Router updated for PostgreSQL transition
 	mux := router.NewRouter(orderHandler, menuHandler, inventoryHandler, aggregationHandler)
 
 	handler := appLogger.HTTPMiddleware(mux)

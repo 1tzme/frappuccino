@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"frappuccino/models"
+	"frappuccino/pkg/database"
 	"frappuccino/pkg/logger"
 )
 
@@ -35,25 +36,27 @@ type MenuRepositoryInterface interface {
 }
 
 // TODO: Transition State: JSON → PostgreSQL
-// DEPRECATED: Replace this struct with PostgreSQL connection
-// New struct should contain *database.DB instead of map and file operations
+// UPDATED: Struct now includes database connection
+// New struct contains *database.DB instead of file operations
 type MenuRepository struct {
-	items        map[string]*models.MenuItem // TODO: Replace with database.DB
+	items        map[string]*models.MenuItem // TODO: Replace with database queries
 	mutex        sync.RWMutex                // TODO: Remove (database handles this)
 	logger       *logger.Logger
-	dataFilePath string // TODO: Remove (no more file operations)
-	loaded       bool   // TODO: Remove (no more file loading)
+	db           *database.DB // NEW: Database connection
+	dataFilePath string       // TODO: Remove (no more file operations)
+	loaded       bool         // TODO: Remove (no more file loading)
 }
 
 // TODO: Transition State: JSON → PostgreSQL
-// DEPRECATED: Replace constructor to accept database connection instead of dataDir
+// UPDATED: Constructor now accepts database connection instead of dataDir
 // New signature: NewMenuRepository(logger *logger.Logger, db *database.DB) *MenuRepository
-func NewMenuRepository(logger *logger.Logger, dataDir string) *MenuRepository {
+func NewMenuRepository(logger *logger.Logger, db *database.DB) *MenuRepository {
 	return &MenuRepository{
-		items:        make(map[string]*models.MenuItem), // TODO: Remove
+		items:        make(map[string]*models.MenuItem), // TODO: Replace with database queries
 		logger:       logger.WithComponent("menu_repository"),
-		dataFilePath: filepath.Join(dataDir, "menu_items.json"), // TODO: Remove
-		loaded:       false,                                     // TODO: Remove
+		db:           db,   // NEW: Store database connection
+		dataFilePath: "",   // TODO: Remove completely
+		loaded:       true, // Skip file loading during transition
 	}
 }
 

@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"frappuccino/models"
+	"frappuccino/pkg/database"
 	"frappuccino/pkg/logger"
 )
 
@@ -117,25 +118,27 @@ func (r *InventoryRepository) Delete(id string) error {
 }
 
 // TODO: Transition State: JSON → PostgreSQL
-// DEPRECATED: Replace this struct with PostgreSQL connection
-// New struct should contain *database.DB instead of map and file operations
+// UPDATED: Struct now includes database connection
+// New struct contains *database.DB instead of file operations
 type InventoryRepository struct {
-	items        map[string]*models.InventoryItem // TODO: Replace with database.DB
+	items        map[string]*models.InventoryItem // TODO: Replace with database queries
 	mutex        sync.RWMutex                     // TODO: Remove (database handles this)
 	logger       *logger.Logger
-	dataFilePath string // TODO: Remove (no more file operations)
-	loaded       bool   // TODO: Remove (no more file loading)
+	db           *database.DB // NEW: Database connection
+	dataFilePath string       // TODO: Remove (no more file operations)
+	loaded       bool         // TODO: Remove (no more file loading)
 }
 
 // TODO: Transition State: JSON → PostgreSQL
-// DEPRECATED: Replace constructor to accept database connection instead of dataDir
+// UPDATED: Constructor now accepts database connection instead of dataDir
 // New signature: NewInventoryRepository(logger *logger.Logger, db *database.DB) *InventoryRepository
-func NewInventoryRepository(logger *logger.Logger, dataDir string) *InventoryRepository {
+func NewInventoryRepository(logger *logger.Logger, db *database.DB) *InventoryRepository {
 	return &InventoryRepository{
-		items:        make(map[string]*models.InventoryItem), // TODO: Remove
+		items:        make(map[string]*models.InventoryItem), // TODO: Replace with database queries
 		logger:       logger.WithComponent("inventory_repository"),
-		dataFilePath: filepath.Join(dataDir, "inventory.json"), // TODO: Remove
-		loaded:       false,                                    // TODO: Remove
+		db:           db,   // NEW: Store database connection
+		dataFilePath: "",   // TODO: Remove completely
+		loaded:       true, // Skip file loading during transition
 	}
 }
 

@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"frappuccino/models"
+	"frappuccino/pkg/database"
 	"frappuccino/pkg/logger"
 )
 
@@ -37,29 +38,29 @@ type OrderRepositoryInterface interface {
 }
 
 // TODO: Transition State: JSON → PostgreSQL
-// DEPRECATED: Replace this struct with PostgreSQL connection
-// New struct should contain:
-// - *database.DB instead of map and file operations
-// - Remove mutex (database handles concurrency)
-// - Remove dataFilePath and loaded fields
+// UPDATED: Constructor now accepts database connection instead of dataDir
+// Signature: NewOrderRepository(logger *logger.Logger, db *database.DB) *OrderRepository
+// Temporarily keeping file operations while transitioning to database
 type OrderRepository struct {
-	orders       map[string]*models.Order // TODO: Replace with database.DB
+	orders       map[string]*models.Order // TODO: Replace with database queries
 	mutex        sync.RWMutex             // TODO: Remove (database handles this)
 	logger       *logger.Logger
-	dataFilePath string // TODO: Remove (no more file operations)
-	loaded       bool   // TODO: Remove (no more file loading)
+	db           *database.DB // NEW: Database connection
+	dataFilePath string       // TODO: Remove (no more file operations)
+	loaded       bool         // TODO: Remove (no more file loading)
 }
 
 // TODO: Transition State: JSON → PostgreSQL
-// DEPRECATED: Replace constructor to accept database connection instead of dataDir
+// UPDATED: Constructor now accepts database connection instead of dataDir
 // New signature: NewOrderRepository(logger *logger.Logger, db *database.DB) *OrderRepository
-// Remove file path initialization, add database connection
-func NewOrderRepository(logger *logger.Logger, dataDir string) *OrderRepository {
+// Temporarily falls back to in-memory storage during transition
+func NewOrderRepository(logger *logger.Logger, db *database.DB) *OrderRepository {
 	return &OrderRepository{
-		orders:       make(map[string]*models.Order), // TODO: Remove
+		orders:       make(map[string]*models.Order), // TODO: Replace with database queries
 		logger:       logger.WithComponent("order_repository"),
-		dataFilePath: filepath.Join(dataDir, "orders.json"), // TODO: Remove
-		loaded:       false,                                 // TODO: Remove
+		db:           db,   // NEW: Store database connection
+		dataFilePath: "",   // TODO: Remove completely
+		loaded:       true, // Skip file loading during transition
 	}
 }
 
