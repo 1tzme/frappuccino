@@ -3,11 +3,18 @@ package repositories
 // TODO: Transition State: JSON → PostgreSQL
 // ✅ COMPLETED: PostgreSQL-backed repository implementation
 // ✅ 1. Replaced map[string]*models.InventoryItem with database connection
-// ✅ 2. Replaced JSON file operations with SQL queries for inventory_items table
+// ✅ 2. Replaced JSON file operations with SQL queries for inventory table
 // ✅ 3. Removed file I/O operations (loadFromFile, saveToFile, backupFile)
 // ✅ 4. Replaced sync.RWMutex with database transaction handling
 // ✅ 5. Converted dataFilePath to database connection dependency
-// 6. TODO: Implement proper SQL schema for inventory_items table (create migration)
+// ✅ 6. COMPLETED: Uses existing PostgreSQL schema with inventory table
+//
+// Schema Details:
+// - Uses existing 'inventory' table from init.sql
+// - Auto-generates UUIDs for new items via PostgreSQL DEFAULT uuid_generate_v4()
+// - Enforces constraints: quantity >= 0, min_threshold >= 0, name UNIQUE
+// - Includes proper indexes for performance and full-text search capabilities
+// - Has triggers for automatic last_updated timestamp management
 
 import (
 	"database/sql"
@@ -32,28 +39,33 @@ type InventoryRepositoryInterface interface {
 
 // Add adds a new inventory item
 func (r *InventoryRepository) Add(item *models.InventoryItem) error {
-	r.logger.Debug("Adding new inventory item to database", "item_id", item.IngredientID)
+	r.logger.Debug("Adding new inventory item to database", "item_name", item.Name)
 
 	if err := r.validateInventoryItem(item); err != nil {
-		r.logger.Error("Failed to validate inventory item", "error", err, "item_id", item.IngredientID)
+		r.logger.Error("Failed to validate inventory item", "error", err, "item_name", item.Name)
 		return err
 	}
 
 	query := `
-		INSERT INTO inventory_items (ingredient_id, name, quantity, unit, min_threshold) 
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO inventory (name, quantity, unit, min_threshold) 
+		VALUES ($1, $2, $3, $4)
+		RETURNING id
 	`
 
-	_, err := r.db.Exec(query, item.IngredientID, item.Name, item.Quantity, item.Unit, item.MinThreshold)
+	var generatedID string
+	err := r.db.QueryRow(query, item.Name, item.Quantity, item.Unit, item.MinThreshold).Scan(&generatedID)
 	if err != nil {
 		// Check if this is a duplicate key error (PostgreSQL constraint violation)
 		if strings.Contains(err.Error(), "duplicate key value") || strings.Contains(err.Error(), "violates unique constraint") {
-			r.logger.Warn("Attempted to add duplicate inventory item", "item_id", item.IngredientID, "error", err)
-			return fmt.Errorf("inventory item with id %s already exists", item.IngredientID)
+			r.logger.Warn("Attempted to add duplicate inventory item", "item_name", item.Name, "error", err)
+			return fmt.Errorf("inventory item with name %s already exists", item.Name)
 		}
-		r.logger.Error("Failed to add inventory item", "error", err, "item_id", item.IngredientID)
+		r.logger.Error("Failed to add inventory item", "error", err, "item_name", item.Name)
 		return fmt.Errorf("failed to add inventory item: %v", err)
 	}
+
+	// Update the item with the generated ID
+	item.IngredientID = generatedID
 
 	r.logger.Info("Added new inventory item", "item_id", item.IngredientID, "name", item.Name)
 	return nil
@@ -64,9 +76,9 @@ func (r *InventoryRepository) GetByID(id string) (*models.InventoryItem, error) 
 	r.logger.Debug("Retrieving inventory item from database", "item_id", id)
 
 	query := `
-		SELECT ingredient_id, name, quantity, unit, min_threshold 
-		FROM inventory_items 
-		WHERE ingredient_id = $1
+		SELECT id, name, quantity, unit, min_threshold 
+		FROM inventory 
+		WHERE id = $1
 	`
 
 	row := r.db.QueryRow(query, id)
@@ -97,7 +109,7 @@ func (r *InventoryRepository) GetByID(id string) (*models.InventoryItem, error) 
 func (r *InventoryRepository) Delete(id string) error {
 	r.logger.Debug("Deleting inventory item from database", "item_id", id)
 
-	query := `DELETE FROM inventory_items WHERE ingredient_id = $1`
+	query := `DELETE FROM inventory WHERE id = $1`
 
 	result, err := r.db.Exec(query, id)
 	if err != nil {
@@ -142,8 +154,8 @@ func (r *InventoryRepository) GetAll() ([]*models.InventoryItem, error) {
 	r.logger.Debug("Retrieving all inventory items from database")
 
 	query := `
-		SELECT ingredient_id, name, quantity, unit, min_threshold 
-		FROM inventory_items 
+		SELECT id, name, quantity, unit, min_threshold 
+		FROM inventory 
 		ORDER BY name
 	`
 
@@ -183,7 +195,7 @@ func (r *InventoryRepository) GetAll() ([]*models.InventoryItem, error) {
 func (r *InventoryRepository) Update(id string, item *models.InventoryItem) error {
 	r.logger.Debug("Updating inventory item in database", "item_id", id)
 
-	if err := r.validateInventoryItem(item); err != nil {
+	if err := r.validateInventoryItemForUpdate(item, id); err != nil {
 		r.logger.Error("Failed to validate inventory item", "error", err, "item_id", id)
 		return fmt.Errorf("invalid inventory item: %v", err)
 	}
@@ -192,9 +204,9 @@ func (r *InventoryRepository) Update(id string, item *models.InventoryItem) erro
 	item.IngredientID = id
 
 	query := `
-		UPDATE inventory_items 
+		UPDATE inventory 
 		SET name = $1, quantity = $2, unit = $3, min_threshold = $4
-		WHERE ingredient_id = $5
+		WHERE id = $5
 	`
 
 	result, err := r.db.Exec(query, item.Name, item.Quantity, item.Unit, item.MinThreshold, id)
@@ -218,13 +230,18 @@ func (r *InventoryRepository) Update(id string, item *models.InventoryItem) erro
 	return nil
 }
 
+func (r *InventoryRepository) validateInventoryItemForUpdate(item *models.InventoryItem, id string) error {
+	if id == "" {
+		return errors.New("ingredient ID cannot be empty for updates")
+	}
+	return r.validateInventoryItem(item)
+}
+
 func (r *InventoryRepository) validateInventoryItem(item *models.InventoryItem) error {
 	if item == nil {
 		return errors.New("inventory item cannot be nil")
 	}
-	if item.IngredientID == "" {
-		return errors.New("ingredient ID cannot be empty")
-	}
+	// Note: IngredientID can be empty for new items (will be auto-generated)
 	if item.Name == "" {
 		return errors.New("ingredient name cannot be empty")
 	}
