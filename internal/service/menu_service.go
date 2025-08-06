@@ -10,6 +10,7 @@ package service
 
 import (
 	"fmt"
+	"strings"
 
 	"frappuccino/internal/repositories"
 	"frappuccino/models"
@@ -37,7 +38,7 @@ type UpdateMenuItemRequest struct {
 type MenuServiceInterface interface {
 	GetAllMenuItems() ([]*models.MenuItem, error)
 	GetMenuItem(id string) (*models.MenuItem, error)
-	CreateMenuItem(id string, req CreateMenuItemRequest) (*models.MenuItem, error)
+	CreateMenuItem(req CreateMenuItemRequest) (*models.MenuItem, error)
 	UpdateMenuItem(id string, req UpdateMenuItemRequest) error
 	DeleteMenuItem(id string) error
 }
@@ -73,11 +74,11 @@ func (s *MenuService) GetAllMenuItems() ([]*models.MenuItem, error) {
 }
 
 // CreateMenuItem creates new menu item
-func (s *MenuService) CreateMenuItem(id string, req CreateMenuItemRequest) (*models.MenuItem, error) {
-	s.logger.Info("Creating menu item", "id", id, "name", req.Name, "price", req.Price)
+func (s *MenuService) CreateMenuItem(req CreateMenuItemRequest) (*models.MenuItem, error) {
+	s.logger.Info("Creating menu item", "name", req.Name, "price", req.Price)
 
 	if err := s.validateCreateMenuItemData(req); err != nil {
-		s.logger.Warn("Create failed: invalid data", "id", id, "error", err)
+		s.logger.Warn("Create failed: invalid data", "error", err)
 		return nil, err
 	}
 	if err := s.validateIngredients(req.Ingredients); err != nil {
@@ -85,8 +86,10 @@ func (s *MenuService) CreateMenuItem(id string, req CreateMenuItemRequest) (*mod
 		return nil, err
 	}
 
+	newID := s.generateMenuItemID(req.Name)
+
 	item := &models.MenuItem{
-		ID:          id,
+		ID:          newID,
 		Name:        req.Name,
 		Description: req.Description,
 		Category:    req.Category,
@@ -96,11 +99,11 @@ func (s *MenuService) CreateMenuItem(id string, req CreateMenuItemRequest) (*mod
 	}
 
 	if err := s.menuRepo.Create(item); err != nil {
-		s.logger.Error("Failed to create menu item in repository", "id", id, "error", err)
+		s.logger.Error("Failed to create menu item in repository", "id", newID, "error", err)
 		return nil, err
 	}
 
-	s.logger.Info("Menu item created successfully", "id", id, "name", req.Name)
+	s.logger.Info("Menu item created successfully", "id", newID, "name", req.Name)
 	return item, nil
 }
 
@@ -162,10 +165,16 @@ func (s *MenuService) UpdateMenuItem(id string, req UpdateMenuItemRequest) error
 		updatedItem.Ingredients = *req.Ingredients
 	}
 
-	if err := s.menuRepo.Update(id, updatedItem); err != nil {
-		s.logger.Error("Failed to update menu item", "id", id, "error", err)
-		return err
-	}
+	if s.hasMenuItemChanged(existingItem, updatedItem) {
+        if err := s.menuRepo.Update(id, updatedItem); err != nil {
+            s.logger.Error("Failed to update menu item", "id", id, "error", err)
+            return err
+        }
+        s.logger.Info("Menu item updated successfully", "id", id)
+    } else {
+        s.logger.Warn("Update canceled: no changes detected", "id", id)
+        return fmt.Errorf("no changes detected for menu item with ID %s", id)
+    }
 
 	s.logger.Info("Menu item updated successfully", "id", id, "name", req.Name)
 	return nil
@@ -306,4 +315,48 @@ func (s *MenuService) validateIngredients(ingredients []models.MenuItemIngredien
 		// }
 	}
 	return nil
+}
+
+// hasMenuItemChanged checks if any changes were made to menu item
+func (s *MenuService) hasMenuItemChanged(existing, updated *models.MenuItem) bool {
+	if existing.Name != updated.Name || existing.Description != updated.Description ||
+		existing.Category != updated.Category || existing.Price != updated.Price || existing.Available != updated.Available {
+		return true
+	}
+
+	if len(existing.Ingredients) != len(updated.Ingredients) {
+		return true
+	}
+
+	existingIngredients := make(map[string]float64)
+	for _, ing := range existing.Ingredients {
+		existingIngredients[ing.IngredientID] = ing.Quantity
+	}
+
+	for _, ing := range updated.Ingredients {
+		if qty, exists := existingIngredients[ing.IngredientID]; !exists || qty != ing.Quantity {
+			return true
+		}
+	}
+
+	return false
+}
+
+// generateMenuItemID generates menu item ID based on the name
+func (s *MenuService) generateMenuItemID(name string) string {
+	cleaned := strings.ToLower(strings.TrimSpace(name))
+	cleaned = strings.ReplaceAll(cleaned, " ", "_")
+
+	result := ""
+    for _, char := range cleaned {
+        if (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') || char == '_' {
+            result += string(char)
+        }
+    }
+    
+    if result == "" {
+        result = "menu_item"
+    }
+    
+    return result
 }
