@@ -1,15 +1,5 @@
 package main
 
-// TODO: Transition State: JSON → PostgreSQL
-// COMPLETED: Replaced JSON-based repositories with PostgreSQL-backed repositories
-// ✓ 2. Replace orderRepo := repositories.NewOrderRepository(appLogger, flagConfig.DataDir)
-//    with orderRepo := repositories.NewOrderRepository(appLogger, db)
-// ✓ 3. Replace menuRepo := repositories.NewMenuRepository(appLogger, flagConfig.DataDir)
-//    with menuRepo := repositories.NewMenuRepository(appLogger, db)
-// ✓ 4. Replace inventoryRepo := repositories.NewInventoryRepository(appLogger, flagConfig.DataDir)
-//    with inventoryRepo := repositories.NewInventoryRepository(appLogger, db)
-// TODO: 5. Remove flagConfig.DataDir dependency entirely
-
 import (
 	"fmt"
 	"net/http"
@@ -17,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	// TODO: Imports uncommented for PostgreSQL transition
 	"frappuccino/internal/handler"
 	"frappuccino/internal/repositories"
 	"frappuccino/internal/router"
