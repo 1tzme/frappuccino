@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"frappuccino/models"
 	"frappuccino/pkg/database"
@@ -51,20 +52,55 @@ func NewMenuRepository(logger *logger.Logger, db *database.DB) *MenuRepository {
 
 // GetAll - retrieves all menu items
 func (r *MenuRepository) GetAll() ([]*models.MenuItem, error) {
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
+	r.logger.Debug("Retrieving all menu items from database")
 
-	if !r.loaded {
-		if err := r.loadFromFile(); err != nil {
-			r.logger.Error("Failed to load menu items from file", "error", err)
-			return nil, err
+	query := `
+        SELECT m.id, m.name, m.description, m.category, m.price, m.available,
+               COALESCE(
+                   json_agg(
+                       json_build_object(
+                           'ingredient_id', mi.ingredient_id,
+                           'quantity', mi.required_quantity
+                       )
+                   ) FILTER (WHERE mi.ingredient_id IS NOT NULL), '[]'::json
+               ) as ingredients
+        FROM menu_items m
+        LEFT JOIN menu_item_ingredients mi ON m.id = mi.menu_item_id
+        GROUP BY m.id, m.name, m.description, m.category, m.price, m.available
+        ORDER BY m.name
+    `
+
+	rows, err := r.db.Query(query)
+	if err != nil {
+		r.logger.Error("Failed to query menu items", "error", err)
+		return nil, fmt.Errorf("failed to query menu items: %v", err)
+	}
+	defer rows.Close()
+
+	items := []*models.MenuItem{}
+	for rows.Next() {
+		item := &models.MenuItem{}
+		ingredientsJSON := ""
+
+		err := rows.Scan(&item.ID, &item.Name, &item.Description, &item.Category, &item.Price, &item.Available, &ingredientsJSON)
+		if err != nil {
+			r.logger.Error("Failed to scan menu items", "error", err)
+			return nil, fmt.Errorf("failed to scan menu item: %v", err)
 		}
+
+		err = r.parseIngredients(ingredientsJSON, &item.Ingredients)
+		if err != nil {
+			r.logger.Error("Failed to parse ingredients", "error", err, "item_id", item.ID)
+			return nil, fmt.Errorf("failed to parse ingredients for item %s: %v", item.ID, err)
+		}
+
+		items = append(items, item)
 	}
 
-	items := make([]*models.MenuItem, 0, len(r.items))
-	for _, item := range r.items {
-		itemCopy := *item
-		items = append(items, &itemCopy)
+	err = rows.Err()
+	if err != nil {
+		r.logger.Error("Error iterating menu rows", "error", err)
+		return nil, fmt.Errorf("error iterating menu rows: %v", err)
 	}
 
 	r.logger.Info("Retrieved all menu items", "count", len(items))
@@ -73,129 +109,199 @@ func (r *MenuRepository) GetAll() ([]*models.MenuItem, error) {
 
 // Create - creates a new menu item
 func (r *MenuRepository) Create(item *models.MenuItem) error {
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
+	r.logger.Debug("Adding new menu item", "item_name", item.Name)
 
-	if !r.loaded {
-		if err := r.loadFromFile(); err != nil {
-			r.logger.Error("Failed to load menu items from file", "error", err)
-			return err
+	err := r.validateMenuItem(item)
+	if err != nil {
+		r.logger.Error("Failed to validate menu item", "error", err, "item_name", item.Name)
+		return err
+	}
+
+	tx, err := r.db.Begin()
+	if err != nil {
+		r.logger.Error("Failed to begin transaction", "error", err)
+		return fmt.Errorf("failed to begin transaction: %v", err)
+	}
+	defer tx.Rollback()
+
+	query := `
+        INSERT INTO menu_items (id, name, description, category, price, available)
+        VALUES ($1, $2, $3, $4, $5, $6)
+    `
+
+	_, err = tx.Exec(query, item.ID, item.Name, item.Description, item.Category, item.Price, item.Available)
+	if err != nil {
+		if strings.Contains(err.Error(), "duplicate key value") || strings.Contains(err.Error(), "violates unique constraint") {
+			r.logger.Warn("Attempted to add duplicate menu item", "item_id", item.ID, "error", err)
+			return fmt.Errorf("menu item with ID %s already exists", item.ID)
 		}
+		r.logger.Error("Failed to add menu item", "error", err, "item_id", item.ID)
+		return fmt.Errorf("failed to add menu item: %v", err)
 	}
 
-	_, exists := r.items[item.ID]
-	if exists {
-		r.logger.Warn("Attempted to create duplicate menu item", "item_id", item.ID)
-		return fmt.Errorf("menu item with ID %s already exists", item.ID)
+	err = r.insertIngredients(tx, item.ID, item.Ingredients)
+	if err != nil {
+		r.logger.Error("Failed to add menu item ingredients", "error", err, "item_id", item.ID)
+		return fmt.Errorf("failed to add menu item ingredients: %v", err)
 	}
 
-	if err := r.validateMenuItem(item); err != nil {
-		r.logger.Error("Failed to validate menu item", "error", err, "item_id", item.ID)
-		return err
+	err = tx.Commit()
+	if err != nil {
+		r.logger.Error("Failed to commit transaction", "error", err)
+		return fmt.Errorf("failed to commit transaction: %v", err)
 	}
 
-	r.items[item.ID] = item
-
-	if err := r.saveToFile(); err != nil {
-		r.logger.Error("Failed to save menu items after create", "error", err)
-		return err
-	}
-
-	r.logger.Info("Created new menu item", "item_id", item.ID, "name", item.Name, "price", item.Price)
+	r.logger.Info("Added new menu item", "item_id", item.ID, "name", item.Name)
 	return nil
 }
 
 // Update - updates existing menu item
 func (r *MenuRepository) Update(id string, item *models.MenuItem) error {
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
+	r.logger.Debug("Updating menu item in database", "item_id", id)
 
-	if !r.loaded {
-		if err := r.loadFromFile(); err != nil {
-			r.logger.Error("Failed to load menu items from file", "error", err)
-			return err
-		}
+	if err := r.validateMenuItemForUpdate(item, id); err != nil {
+		r.logger.Error("Failed to validate menu item", "error", err, "item_id", id)
+		return fmt.Errorf("invalid menu item: %v", err)
 	}
 
-	_, exists := r.items[id]
-	if !exists {
-		r.logger.Warn("Attempted to update non existing menu item", "item_id", id)
+	tx, err := r.db.Begin()
+	if err != nil {
+		r.logger.Error("Failed to begin transaction", "error", err)
+		return fmt.Errorf("failed to begin transaction: %v", err)
+	}
+	defer tx.Rollback()
+
+	query := `
+        UPDATE menu_items
+        SET name = $1, description = $2, category = $3, price = $4, available = $5
+        WHERE id = $6
+    `
+
+    result, err := tx.Exec(query, item.Name, item.Description, item.Category, item.Price, item.Available, id)
+	if err != nil {
+		r.logger.Error("Failed to update menu item", "error", err, "item_id", item.ID)
+		return fmt.Errorf("failed to update menu item: %v", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		r.logger.Error("Failed to get rows affected", "error", err, "item_id", item)
+		return fmt.Errorf("failed to get rows affected: %v", err)
+	}
+	if rowsAffected == 0 {
+		r.logger.Warn("Attempted to update non-existent menu item", "item_id", id)
 		return fmt.Errorf("menu item with id %s not found", id)
 	}
 
-	if err := r.validateMenuItem(item); err != nil {
-		r.logger.Error("Failed to validate menu item", "error", err, "item_id", id)
-		return err
-	}
-	if err := r.backupFile(); err != nil {
-		r.logger.Warn("Failed to create backup file", "error", err)
+	err = r.deleteIngredients(tx, id)
+	if err != nil {
+		r.logger.Error("Failed to delete existing ingredients", "error", err, "item_id", id)
+		return fmt.Errorf("failed to delete existing ingredients: %v", err)
 	}
 
-	item.ID = id
-	r.items[id] = item
-
-	if err := r.saveToFile(); err != nil {
-		r.logger.Error("Failed to save menu items after update", "error", err, "item_id", id)
-		return err
+	err = r.insertIngredients(tx, id, item.Ingredients)
+	if err != nil {
+		r.logger.Error("Failed to update menu item ingredients", "error", err, "item_id", id)
+		return fmt.Errorf("failed to update menu item ingredients: %v", err)
 	}
 
-	r.logger.Info("Updated menu item", "item_id", id, "name", item.Name, "price", item.Price)
+	err = tx.Commit()
+	if err != nil {
+		r.logger.Error("Failed to commit transaction", "error", err, "item_id", id)
+		return fmt.Errorf("failed to commit transaction: %v", err)
+	}
+
+	r.logger.Info("Updated menu item", "item_id", id, "name", item.Name)
 	return nil
 }
 
 // Delete - removes menu item by ID
 func (r *MenuRepository) Delete(id string) error {
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
+	r.logger.Debug("Deleting menu item from database", "item_id", id)
 
-	if !r.loaded {
-		if err := r.loadFromFile(); err != nil {
-			r.logger.Error("Failed to load menu items from file", "error", err)
-			return err
-		}
+	tx, err := r.db.Begin()
+	if err != nil {
+		r.logger.Error("Failed to begin transaction", "error", err)
+		return fmt.Errorf("failed to begin transaction: %v", err)
+	}
+	defer tx.Rollback()
+
+	err = r.deleteIngredients(tx, id)
+	if err != nil {
+		r.logger.Error("Failed to delete menu item ingredients", "error", err, "item_id", id)
+		return fmt.Errorf("failed to delete menu item ingredients: %v", err)
 	}
 
-	item, exists := r.items[id]
-	if !exists {
-		r.logger.Warn("Attempted to delete non-existent menu item", "item_id", id)
-		return fmt.Errorf("menu item with id %s not found", id)
-	}
-	if err := r.backupFile(); err != nil {
-		r.logger.Warn("Failed to create backup before delete", "error", err)
-	}
+	query := `DELETE FROM menu_items WHERE id = $1`
+	result, err := tx.Exec(query, id)
 
-	delete(r.items, id)
+	if err != nil {
+        r.logger.Error("Failed to delete menu item", "error", err, "item_id", id)
+        return fmt.Errorf("failed to delete menu item: %v", err)
+    }
 
-	if err := r.saveToFile(); err != nil {
-		r.logger.Error("Failed to save menu items after delete", "error", err)
-		return err
-	}
+    rowsAffected, err := result.RowsAffected()
+    if err != nil {
+        r.logger.Error("Failed to get rows affected", "error", err, "item_id", id)
+        return fmt.Errorf("failed to get rows affected: %v", err)
+    }
+    if rowsAffected == 0 {
+        r.logger.Warn("Attempted to delete non-existent menu item", "item_id", id)
+        return fmt.Errorf("menu item with id %s not found", id)
+    }
 
-	r.logger.Info("Deleted menu item", "item_id", id, "name", item.Name)
-	return nil
+    if err := tx.Commit(); err != nil {
+        r.logger.Error("Failed to commit transaction", "error", err, "item_id", id)
+        return fmt.Errorf("failed to commit transaction: %v", err)
+    }
+
+    r.logger.Info("Deleted menu item", "item_id", id)
+    return nil
 }
 
 // GetByID - retrieves menu item by ID
 func (r *MenuRepository) GetByID(id string) (*models.MenuItem, error) {
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
+	r.logger.Debug("Retrieving menu item from database", "item_id", id)
 
-	if !r.loaded {
-		if err := r.loadFromFile(); err != nil {
-			r.logger.Error("Failed to load menu items from file", "error", err)
-			return nil, err
-		}
-	}
+    query := `
+        SELECT m.id, m.name, m.description, m.category, m.price, m.available,
+               COALESCE(
+                   json_agg(
+                       json_build_object(
+                           'ingredient_id', mi.ingredient_id,
+                           'quantity', mi.required_quantity
+                       )
+                   ) FILTER (WHERE mi.ingredient_id IS NOT NULL), '[]'::json
+               ) as ingredients
+        FROM menu_items m
+        LEFT JOIN menu_item_ingredients mi ON m.id = mi.menu_item_id
+        WHERE m.id = $1
+        GROUP BY m.id, m.name, m.description, m.category, m.price, m.available
+    `
 
-	item, exists := r.items[id]
-	if !exists {
-		r.logger.Warn("Menu item not found", "item_id", id)
-		return nil, fmt.Errorf("menu item with id %s not found", id)
-	}
+	row := r.db.QueryRow(query, id)
 
-	itemCopy := *item
-	r.logger.Info("Retrieved menu item", "item_id", id, "name", item.Name)
-	return &itemCopy, nil
+    item := &models.MenuItem{}
+    var ingredientsJSON string
+
+    err := row.Scan(&item.ID, &item.Name, &item.Description, &item.Category, &item.Price, &item.Available, &ingredientsJSON)
+
+    if err != nil {
+        if err == sql.ErrNoRows {
+            r.logger.Warn("Menu item not found", "item_id", id)
+            return nil, fmt.Errorf("menu item with id %s not found", id)
+        }
+        r.logger.Error("Failed to retrieve menu item", "error", err, "item_id", id)
+        return nil, fmt.Errorf("failed to retrieve menu item: %v", err)
+    }
+
+    if err := r.parseIngredients(ingredientsJSON, &item.Ingredients); err != nil {
+        r.logger.Error("Failed to parse ingredients", "error", err, "item_id", item.ID)
+        return nil, fmt.Errorf("failed to parse ingredients for item %s: %v", item.ID, err)
+    }
+
+    r.logger.Debug("Retrieved menu item", "item_id", id, "name", item.Name)
+    return item, nil
 }
 
 // TODO: Implement GetPopularItems method - Get popular menu items aggregation
@@ -235,7 +341,7 @@ func (r *MenuRepository) deleteIngredients(tx *sql.Tx, menuItemId string) error 
 	query := `DELETE FROM menu_item_ingredients WHERE menu_item_id = $1`
 	_, err := tx.Exec(query, menuItemId)
 	if err != nil {
-		fmt.Errorf("failed to delete ingredient: %v", err)
+		return fmt.Errorf("failed to delete ingredient: %v", err)
 	}
 	return nil
 }
@@ -262,6 +368,13 @@ func (r *MenuRepository) parseIngredients(ingredientsJSON string, ingredients *[
 
 	*ingredients = parsed
 	return nil
+}
+
+func (r *MenuRepository) validateMenuItemForUpdate(item *models.MenuItem, id string) error {
+	if id == "" {
+		return errors.New("menu item ID cannot be empty for updates")
+	}
+	return r.validateMenuItem(item)
 }
 
 func (r *MenuRepository) validateMenuItem(item *models.MenuItem) error {
