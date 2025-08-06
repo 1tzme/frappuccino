@@ -11,14 +11,10 @@ package repositories
 // 6. Implement proper SQL schema for menu_items table with ingredients relationship
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"os"
-	"path/filepath"
-	"sync"
-	"time"
 
 	"frappuccino/models"
 	"frappuccino/pkg/database"
@@ -39,12 +35,8 @@ type MenuRepositoryInterface interface {
 // UPDATED: Struct now includes database connection
 // New struct contains *database.DB instead of file operations
 type MenuRepository struct {
-	items        map[string]*models.MenuItem // TODO: Replace with database queries
-	mutex        sync.RWMutex                // TODO: Remove (database handles this)
-	logger       *logger.Logger
-	db           *database.DB // NEW: Database connection
-	dataFilePath string       // TODO: Remove (no more file operations)
-	loaded       bool         // TODO: Remove (no more file loading)
+	logger *logger.Logger
+	db     *database.DB
 }
 
 // TODO: Transition State: JSON → PostgreSQL
@@ -52,11 +44,8 @@ type MenuRepository struct {
 // New signature: NewMenuRepository(logger *logger.Logger, db *database.DB) *MenuRepository
 func NewMenuRepository(logger *logger.Logger, db *database.DB) *MenuRepository {
 	return &MenuRepository{
-		items:        make(map[string]*models.MenuItem), // TODO: Replace with database queries
-		logger:       logger.WithComponent("menu_repository"),
-		db:           db,   // NEW: Store database connection
-		dataFilePath: "",   // TODO: Remove completely
-		loaded:       true, // Skip file loading during transition
+		logger: logger.WithComponent("menu_repository"),
+		db:     db, // NEW: Store database connection
 	}
 }
 
@@ -222,73 +211,56 @@ func (r *MenuRepository) GetByID(id string) (*models.MenuItem, error) {
 // - backupFile() → Database backup strategies
 // - validateMenuItem() → Database constraints and validation
 
-func (r *MenuRepository) loadFromFile() error {
-	if err := os.MkdirAll(filepath.Dir(r.dataFilePath), 0o755); err != nil {
-		return fmt.Errorf("failed to create data directory: %v", err)
-	}
-
-	if _, err := os.Stat(r.dataFilePath); err != nil {
-		r.items = make(map[string]*models.MenuItem)
-		r.loaded = true
-		return r.saveToFile()
-	}
-
-	file, err := os.Open(r.dataFilePath)
-	if err != nil {
-		return fmt.Errorf("failed to open menu items file: %v", err)
-	}
-	defer file.Close()
-
-	data, err := io.ReadAll(file)
-	if err != nil {
-		return fmt.Errorf("failed to open menu items file: %v", err)
-	}
-
-	if len(data) == 0 {
-		r.items = make(map[string]*models.MenuItem)
-		r.loaded = true
+func (r *MenuRepository) insertIngredients(tx *sql.Tx, menuItemId string, ingredients []models.MenuItemIngredient) error {
+	if len(ingredients) == 0 {
 		return nil
 	}
 
-	items := []*models.MenuItem{}
-	if err = json.Unmarshal(data, &items); err != nil {
-		return fmt.Errorf("failed to unmarshal menu items: %v", err)
+	query := `
+		INSERT INTO menu_item_ingredients (menu_item_id, ingredient_id, quantity)
+		VALUES ($1, $2, $3)
+	`
+
+	for _, ingredient := range ingredients {
+		_, err := tx.Exec(query, menuItemId, ingredient.IngredientID, ingredient.Quantity)
+		if err != nil {
+			return fmt.Errorf("failed to insert ingredient %s: %v", ingredient.IngredientID, err)
+		}
 	}
 
-	r.items = make(map[string]*models.MenuItem)
-	for _, item := range items {
-		r.items[item.ID] = item
-	}
-
-	r.loaded = true
-	r.logger.Debug("Loaded menu items from file", "count", len(r.items))
 	return nil
 }
 
-func (r *MenuRepository) saveToFile() error {
-	items := make([]*models.MenuItem, 0, len(r.items))
-	for _, item := range r.items {
-		items = append(items, item)
-	}
-
-	data, err := json.MarshalIndent(items, "", "  ")
+func (r *MenuRepository) deleteIngredients(tx *sql.Tx, menuItemId string) error {
+	query := `DELETE FROM menu_item_ingredients WHERE menu_item_id = $1`
+	_, err := tx.Exec(query, menuItemId)
 	if err != nil {
-		return fmt.Errorf("failed to marshal menu items: %v", err)
+		fmt.Errorf("failed to delete ingredient: %v", err)
 	}
-	if err = os.MkdirAll(filepath.Dir(r.dataFilePath), 0o755); err != nil {
-		return fmt.Errorf("failed to create data directory: %v", err)
+	return nil
+}
+
+func (r *MenuRepository) parseIngredients(ingredientsJSON string, ingredients *[]models.MenuItemIngredient) error {
+	if ingredientsJSON == "" || ingredientsJSON == "[]" {
+		*ingredients = []models.MenuItemIngredient{}
+		return nil
 	}
 
-	tempFile := r.dataFilePath + ".tmp"
-	if err = os.WriteFile(tempFile, data, 0o644); err != nil {
-		return fmt.Errorf("failed to write temporary menu items file: %v", err)
+	raw := []models.MenuItemIngredient{}
+	err := json.Unmarshal([]byte(ingredientsJSON), &raw)
+	if err != nil {
+		return fmt.Errorf("invalid JSON format for ingredients: %v", err)
 	}
 
-	if err = os.Rename(tempFile, r.dataFilePath); err != nil {
-		return fmt.Errorf("failed to rename menu items file: %v", err)
+	parsed := make([]models.MenuItemIngredient, 0, len(raw))
+	for _, ingredient := range raw {
+		parsed = append(parsed, models.MenuItemIngredient{
+			IngredientID: ingredient.IngredientID,
+			Quantity:     ingredient.Quantity,
+		})
 	}
 
-	r.logger.Debug("Save menu items to file", "count", len(items))
+	*ingredients = parsed
 	return nil
 }
 
@@ -318,24 +290,5 @@ func (r *MenuRepository) validateMenuItem(item *models.MenuItem) error {
 		}
 	}
 
-	return nil
-}
-
-func (r *MenuRepository) backupFile() error {
-	if _, err := os.Stat(r.dataFilePath); os.IsNotExist(err) {
-		return nil
-	}
-
-	backupPath := r.dataFilePath + ".backup." + time.Now().Format("20060102_150405")
-
-	data, err := os.ReadFile(r.dataFilePath)
-	if err != nil {
-		return fmt.Errorf("failed to read original file: %v", err)
-	}
-	if err = os.WriteFile(backupPath, data, 0o644); err != nil {
-		return fmt.Errorf("failed to create backup file, %v", err)
-	}
-
-	r.logger.Debug("Created backup file", "backup_path", backupPath)
 	return nil
 }
