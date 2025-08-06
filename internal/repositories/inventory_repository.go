@@ -8,13 +8,6 @@ package repositories
 // ✅ 4. Replaced sync.RWMutex with database transaction handling
 // ✅ 5. Converted dataFilePath to database connection dependency
 // ✅ 6. COMPLETED: Uses existing PostgreSQL schema with inventory table
-//
-// Schema Details:
-// - Uses existing 'inventory' table from init.sql
-// - Auto-generates UUIDs for new items via PostgreSQL DEFAULT uuid_generate_v4()
-// - Enforces constraints: quantity >= 0, min_threshold >= 0, name UNIQUE
-// - Includes proper indexes for performance and full-text search capabilities
-// - Has triggers for automatic last_updated timestamp management
 
 import (
 	"database/sql"
