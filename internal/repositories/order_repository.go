@@ -11,13 +11,9 @@ package repositories
 // 6. Implement proper SQL schema for orders table with relationships
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"os"
-	"path/filepath"
-	"sync"
+	"strings"
 	"time"
 
 	"frappuccino/models"
@@ -42,12 +38,8 @@ type OrderRepositoryInterface interface {
 // Signature: NewOrderRepository(logger *logger.Logger, db *database.DB) *OrderRepository
 // Temporarily keeping file operations while transitioning to database
 type OrderRepository struct {
-	orders       map[string]*models.Order // TODO: Replace with database queries
-	mutex        sync.RWMutex             // TODO: Remove (database handles this)
-	logger       *logger.Logger
-	db           *database.DB // NEW: Database connection
-	dataFilePath string       // TODO: Remove (no more file operations)
-	loaded       bool         // TODO: Remove (no more file loading)
+	logger *logger.Logger
+	db     *database.DB
 }
 
 // TODO: Transition State: JSON → PostgreSQL
@@ -56,86 +48,203 @@ type OrderRepository struct {
 // Temporarily falls back to in-memory storage during transition
 func NewOrderRepository(logger *logger.Logger, db *database.DB) *OrderRepository {
 	return &OrderRepository{
-		orders:       make(map[string]*models.Order), // TODO: Replace with database queries
-		logger:       logger.WithComponent("order_repository"),
-		db:           db,   // NEW: Store database connection
-		dataFilePath: "",   // TODO: Remove completely
-		loaded:       true, // Skip file loading during transition
+		logger: logger.WithComponent("order_repository"),
+		db:     db,
 	}
 }
 
 // Add adds a new order
 func (r *OrderRepository) Add(order *models.Order) error {
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
+	r.logger.Debug("Adding new order to database", "customer_name", order.CustomerName)
 
-	if !r.loaded {
-		if err := r.loadFromFile(); err != nil {
-			r.logger.Error("Failed to load orders from file", "error", err)
-			return err
+	err := r.validateOrder(order)
+	if err != nil {
+		r.logger.Error("Failed to validate order", "error", err, "order_id", order.ID)
+		return fmt.Errorf("failed to validate order: %v", err)
+	}
+
+	tx, err := r.db.Begin()
+	if err != nil {
+		r.logger.Error("Failed to begin transaction", "error", err)
+		return fmt.Errorf("failed to begin transaction: %v", err)
+	}
+	defer tx.Rollback()
+
+	query := `
+		INSERT INTO orders (customer_name, status, total_amount, special_instructions)
+		VALUES ($1, $2, %3, %4)
+		RETURNING id, created_at, updated_at`
+
+	generatedID := ""
+	var createdAt, updatedAt time.Time
+
+	err = tx.QueryRow(query, order.CustomerName, order.Status, order.TotalAmount, order.SpecialInstructions).Scan(&generatedID, &createdAt, &updatedAt)
+	if err != nil {
+		r.logger.Error("Failed to insert order", "error", err, "customer_name", order.CustomerName)
+		return fmt.Errorf("failed to insert order: %v", err)
+	}
+
+	order.ID = generatedID
+	order.CreatedAt = createdAt
+	order.UpdatedAt = updatedAt
+
+	if len(order.Items) > 0 {
+		itemQuery := `
+			INSERT INTO order_items (order_id, menu_item_id, quantity, price_at_time, customizations)
+			VALUES ($1, $2, $3, $4, $5)
+			RETURNING id`
+
+		for i, item := range order.Items {
+			itemID := ""
+			err := tx.QueryRow(itemQuery, order.ID, item.MenuItemID, item.Quantity, item.PriceAtTime, item.Customizations).Scan(&itemID)
+			if err != nil {
+				r.logger.Error("Failed to insert order item", "error", err, "order_id", order.ID, "menu_item_id", item.MenuItemID)
+				return fmt.Errorf("failed to insert order item: %v", err)
+			}
+			order.Items[i].ID = itemID
+			order.Items[i].OrderID = order.ID
 		}
 	}
 
-	if _, exists := r.orders[order.ID]; exists {
-		r.logger.Warn("Attempted to add duplicate order", "order_id", order.ID)
-		return fmt.Errorf("order with id %s already exists", order.ID)
+	err = tx.Commit()
+	if err != nil {
+		r.logger.Error("Failed to commit transaction", "error", err, "order_id", order.ID)
+		return fmt.Errorf("failed to commit transaction: %v", err)
 	}
 
-	if err := r.validateOrder(order); err != nil {
-		r.logger.Error("Failed to validate order", "error", err, "order_id", order.ID)
-		return err
-	}
-
-	r.orders[order.ID] = order
-	if err := r.saveToFile(); err != nil {
-		r.logger.Error("Failed to save orders after add", "error", err)
-		return err
-	}
-	r.logger.Info("Added new order", "order_id", order.ID, "customer", order.CustomerName)
+	r.logger.Info("Added new order", "order_id", order.ID, "customer_name", order.CustomerName)
 	return nil
 }
 
 // GetByID retrieves a single order by ID
 func (r *OrderRepository) GetByID(id string) (*models.Order, error) {
-	r.mutex.RLock()
-	defer r.mutex.RUnlock()
+	r.logger.Debug("Retrieving order from database", "order_id", id)
 
-	if !r.loaded {
-		r.mutex.RUnlock()
-		r.mutex.Lock()
-		defer r.mutex.Unlock()
-		defer r.mutex.RLock()
-		if err := r.loadFromFile(); err != nil {
-			r.logger.Error("Failed to load orders from file", "error", err)
-			return nil, err
+	query := `
+		SELECT id, customer_name, status, total_amount, special_instructions, created_at, updated_at
+		FROM orders
+		WHERE id = $1`
+
+	order := &models.Order{}
+	var specialInstructions string
+	err := r.db.QueryRow(query, id).Scan(&order.ID, &order.CustomerName, &order.Status, &order.TotalAmount, &specialInstructions, &order.CreatedAt, &order.UpdatedAt)
+	if err != nil {
+		r.logger.Error("Failed to retrieve order", "error", err, "order_id", id)
+		return nil, fmt.Errorf("failed to retrieve order: %v", err)
+	}
+
+	itemsQuery := `
+		SELECT id, menu_item_id, quantity, price_at_time, customizations
+		FROM order_items
+		WHERE order_id = $1
+		ORDER BY id`
+
+	rows, err := r.db.Query(itemsQuery, id)
+	if err != nil {
+		r.logger.Error("Failed to query order items", "error", err, "order_id", id)
+		return nil, fmt.Errorf("failed to query order items: %v", err)
+	}
+	defer rows.Close()
+
+	items := []models.OrderItem{}
+	for rows.Next() {
+		item := models.OrderItem{OrderID: id}
+		customizations := ""
+		err := rows.Scan(&item.ID, &item.MenuItemID, &item.Quantity, &item.PriceAtTime, &customizations)
+		if err != nil {
+			r.logger.Error("Failed to scan order item", "error", err, "order_id", id)
+			return nil, fmt.Errorf("failed to scan order item: %v", err)
 		}
+		item.ProductID = item.MenuItemID
+		items = append(items, item)
 	}
 
-	order, exists := r.orders[id]
-	if !exists {
-		r.logger.Warn("Order not found", "order_id", id)
-		return nil, fmt.Errorf("order with id %s not found", id)
+	err = rows.Err()
+	if err != nil {
+		r.logger.Error("Error iterating order items", "error", err, "order_id", id)
+		return nil, fmt.Errorf("error iterating order items: %v", err)
 	}
-	orderCopy := *order
-	return &orderCopy, nil
+
+	order.Items = items
+	r.logger.Debug("Retrieved order with items", "order_id", id, "items_count", len(items))
+	return order, nil
 }
 
 // GetAll retrieves all orders
 func (r *OrderRepository) GetAll() ([]*models.Order, error) {
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
+	r.logger.Debug("Retrieving all orders from database")
 
-	if !r.loaded {
-		if err := r.loadFromFile(); err != nil {
-			r.logger.Error("Failed to load orders from file", "error", err)
-			return nil, err
+	query := `
+		SELECT id, customer_name, status, total_amount, special_instructions, created_at, updated_at
+		FROM orders
+		ORDER BY created_at DESC`
+
+	rows, err := r.db.Query(query)
+	if err != nil {
+		r.logger.Error("Failed to query orders", "error", err)
+		return nil, fmt.Errorf("failed to query orders: %v", err)
+	}
+	defer rows.Close()
+
+	orders := []*models.Order{}
+	orderMap := make(map[string]*models.Order)
+
+	for rows.Next() {
+		order := &models.Order{}
+		var specialInstructions string
+		err := rows.Scan(&order.ID, &order.CustomerName, &order.Status, &order.TotalAmount, &specialInstructions, &order.CreatedAt, &order.UpdatedAt)
+		if err != nil {
+			r.logger.Error("Failed to scan order", "error", err)
+			return nil, fmt.Errorf("failed to scan order: %v", err)
 		}
+		order.Items = []models.OrderItem{}
+		orders = append(orders, order)
+		orderMap[order.ID] = order
 	}
 
-	orders := make([]*models.Order, 0, len(r.orders))
-	for _, order := range r.orders {
-		orderCopy := *order
-		orders = append(orders, &orderCopy)
+	if err = rows.Err(); err != nil {
+		r.logger.Error("Error iterating orders", "error", err)
+		return nil, fmt.Errorf("error iterating orders: %v", err)
+	}
+
+	if len(orders) > 0 {
+		itemsQuery := `
+			SELECT order_id, id, menu_item_id, quantity, price_at_time, customizations
+			FROM order_items
+			WHERE order_id = ANY($1)
+			ORDER BY order_id, id`
+
+		orderIDs := make([]string, len(orders))
+		for i, order := range orders {
+			orderIDs[i] = order.ID
+		}
+
+		itemRows, err := r.db.Query(itemsQuery, "{"+strings.Join(orderIDs, ",")+"}")
+		if err != nil {
+			r.logger.Error("Failed to query order items", "error", err)
+			return nil, fmt.Errorf("failed to query order items: %v", err)
+		}
+		defer itemRows.Close()
+
+		for itemRows.Next() {
+			item := models.OrderItem{}
+			var customizations string
+			err := itemRows.Scan(&item.OrderID, &item.ID, &item.MenuItemID, &item.Quantity, &item.PriceAtTime, &customizations)
+			if err != nil {
+				r.logger.Error("Failed to scan order item", "error", err)
+				return nil, fmt.Errorf("failed to scan order item: %v", err)
+			}
+			item.ProductID = item.MenuItemID
+
+			if order, exists := orderMap[item.OrderID]; exists {
+				order.Items = append(order.Items, item)
+			}
+		}
+
+		if err = itemRows.Err(); err != nil {
+			r.logger.Error("Error iterating order items", "error", err)
+			return nil, fmt.Errorf("error iterating order items: %v", err)
+		}
 	}
 
 	r.logger.Info("Retrieved all orders", "count", len(orders))
@@ -144,233 +253,164 @@ func (r *OrderRepository) GetAll() ([]*models.Order, error) {
 
 // Update updates an existing order
 func (r *OrderRepository) Update(id string, order *models.Order) error {
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
+	r.logger.Debug("Updating order in database", "order_id", id)
 
-	if !r.loaded {
-		if err := r.loadFromFile(); err != nil {
-			r.logger.Error("Failed to load orders from file", "error", err)
-			return fmt.Errorf("failed to load orders: %v", err)
-		}
-	}
-
-	_, exists := r.orders[id]
-	if !exists {
-		r.logger.Warn("Attempted to update non-existent order", "order_id", id)
-		return fmt.Errorf("order with id %s not found", id)
-	}
-
-	if err := r.validateOrder(order); err != nil {
+	if err := r.validateOrderForUpdate(order, id); err != nil {
 		r.logger.Error("Failed to validate order", "error", err, "order_id", id)
 		return fmt.Errorf("invalid order: %v", err)
 	}
 
-	if err := r.backupFile(); err != nil {
-		r.logger.Warn("Failed to create backup", "error", err)
+	tx, err := r.db.Begin()
+	if err != nil {
+		r.logger.Error("Failed to begin transaction", "error", err)
+		return fmt.Errorf("failed to begin transaction: %v", err)
+	}
+	defer tx.Rollback()
+
+	query := `
+		UPDATE orders
+		SET customer_name = $1, status = $2, total_amount = $3, special_instructions = $4
+		WHERE id = $5`
+
+	result, err := tx.Exec(query, order.CustomerName, order.Status, order.TotalAmount, "{}", id)
+	if err != nil {
+		r.logger.Error("Failed to update order", "error", err, "order_id", id)
+		return fmt.Errorf("failed to update order: %v", err)
 	}
 
-	order.ID = id
-	r.orders[id] = order
-
-	if err := r.saveToFile(); err != nil {
-		r.logger.Error("Failed to save orders after update", "error", err, "order_id", id)
-		return fmt.Errorf("failed to save orders: %v", err)
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		r.logger.Error("Failed to get rows affected", "error", err, "order_id", id)
+		return fmt.Errorf("failed to get rows affected: %v", err)
+	}
+	if rowsAffected == 0 {
+		r.logger.Warn("Attempted to update non-existent order", "order_id", id)
+		return fmt.Errorf("order with id %s not found", id)
 	}
 
-	r.logger.Info("Updated order", "order_id", id, "customer", order.CustomerName)
+	deleteItemsQuery := `DELETE FROM order_items WHERE order_id = $1`
+	_, err = tx.Exec(deleteItemsQuery, id)
+	if err != nil {
+		r.logger.Error("Failed to delete existing order items", "error", err, "order_id", id)
+		return fmt.Errorf("failed to delete existing order items: %v", err)
+	}
+
+	if len(order.Items) > 0 {
+		itemQuery := `
+			INSERT INTO order_items (order_id, menu_item_id, quantity, price_at_time, customizations)
+			VALUES ($1, $2, $3, $4, $5)`
+
+		for _, item := range order.Items {
+			_, err = tx.Exec(itemQuery, id, item.MenuItemID, item.Quantity, item.PriceAtTime, "{}")
+			if err != nil {
+				r.logger.Error("Failed to insert updated order item", "error", err, "order_id", id, "menu_item_id", item.MenuItemID)
+				return fmt.Errorf("failed to insert updated order item: %v", err)
+			}
+		}
+	}
+
+	if err = tx.Commit(); err != nil {
+		r.logger.Error("Failed to commit transaction", "error", err, "order_id", id)
+		return fmt.Errorf("failed to commit transaction: %v", err)
+	}
+
+	r.logger.Info("Updated order", "order_id", id, "customer_name", order.CustomerName)
 	return nil
 }
 
 // Delete removes an order by ID
 func (r *OrderRepository) Delete(id string) error {
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
+	r.logger.Debug("Deleting order from database", "order_id", id)
 
-	if !r.loaded {
-		if err := r.loadFromFile(); err != nil {
-			r.logger.Error("Failed to load orders from file", "error", err)
-			return err
-		}
+	query := `DELETE FROM orders WHERE id = $1`
+
+	result, err := r.db.Exec(query, id)
+	if err != nil {
+		r.logger.Error("Failed to delete order", "error", err, "order_id", id)
+		return fmt.Errorf("failed to delete order: %v", err)
 	}
 
-	if _, exists := r.orders[id]; !exists {
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		r.logger.Error("Failed to get rows affected", "error", err, "order_id", id)
+		return fmt.Errorf("failed to get rows affected: %v", err)
+	}
+	if rowsAffected == 0 {
 		r.logger.Warn("Attempted to delete non-existent order", "order_id", id)
 		return fmt.Errorf("order with id %s not found", id)
 	}
 
-	if err := r.backupFile(); err != nil {
-		r.logger.Warn("Failed to create backup before delete", "error", err)
-	}
-
-	delete(r.orders, id)
-	if err := r.saveToFile(); err != nil {
-		r.logger.Error("Failed to save orders after delete", "error", err)
-		return err
-	}
 	r.logger.Info("Deleted order", "order_id", id)
 	return nil
 }
 
 // CloseOrder closes an order by setting status to closed
 func (r *OrderRepository) CloseOrder(id string) error {
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
+	r.logger.Debug("Closing order in database", "order_id", id)
 
-	if !r.loaded {
-		if err := r.loadFromFile(); err != nil {
-			r.logger.Error("Failed to load orders from file", "error", err)
-			return err
-		}
+	query := `
+		UPDATE orders
+		SET status = 'closed'
+		WHERE id = $1 AND status != 'closed'`
+
+	result, err := r.db.Exec(query, id)
+	if err != nil {
+		r.logger.Error("Failed to close order", "error", err, "order_id", id)
+		return fmt.Errorf("failed to close order: %v", err)
 	}
 
-	order, exists := r.orders[id]
-	if !exists {
-		r.logger.Warn("Attempted to close non-existent order", "order_id", id)
-		return fmt.Errorf("order with id %s not found", id)
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		r.logger.Error("Failed to get rows affected", "error", err, "order_id", id)
+		return fmt.Errorf("failed to get rows affected: %v", err)
+	}
+	if rowsAffected == 0 {
+		r.logger.Warn("Attempted to close non-existent or already closed order", "order_id", id)
+		return fmt.Errorf("order with id %s not found or already closed", id)
 	}
 
-	if err := r.backupFile(); err != nil {
-		r.logger.Warn("Failed to create backup before close", "error", err)
-	}
-
-	order.Status = "closed"
-	if err := r.saveToFile(); err != nil {
-		r.logger.Error("Failed to save orders after close", "error", err)
-		return err
-	}
 	r.logger.Info("Closed order", "order_id", id)
 	return nil
 }
 
 // TODO: Transition State: JSON → PostgreSQL
 // DEPRECATED: All file operations below should be removed and replaced with SQL queries
-// - loadFromFile() → SELECT queries with proper table joins
-// - saveToFile() → INSERT/UPDATE queries with transactions
-// - backupFile() → Database backup strategies (pg_dump, WAL archiving)
 // - validateOrder() → Database constraints and triggers
-
-// loadFromFile loads orders from JSON file
-func (r *OrderRepository) loadFromFile() error {
-	err := os.MkdirAll(filepath.Dir(r.dataFilePath), 0o755)
-	if err != nil {
-		return err
-	}
-
-	_, err = os.Stat(r.dataFilePath)
-	if err != nil {
-		r.orders = make(map[string]*models.Order)
-		r.loaded = true
-		return r.saveToFile()
-	}
-
-	file, err := os.Open(r.dataFilePath)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	data, err := io.ReadAll(file)
-	if err != nil {
-		return err
-	}
-
-	if len(data) == 0 {
-		r.orders = make(map[string]*models.Order)
-		r.loaded = true
-		return nil
-	}
-
-	orders := []*models.Order{}
-	err = json.Unmarshal(data, &orders)
-	if err != nil {
-		return err
-	}
-
-	r.orders = make(map[string]*models.Order)
-	for _, order := range orders {
-		r.orders[order.ID] = order
-	}
-
-	r.loaded = true
-	return nil
-}
-
-// saveToFile saves orders to JSON file atomically
-func (r *OrderRepository) saveToFile() error {
-	orders := make([]*models.Order, 0, len(r.orders))
-	for _, order := range r.orders {
-		orders = append(orders, order)
-	}
-
-	data, err := json.MarshalIndent(orders, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal order data: %v", err)
-	}
-
-	err = os.MkdirAll(filepath.Dir(r.dataFilePath), 0o755)
-	if err != nil {
-		return fmt.Errorf("failed to create data directory: %v", err)
-	}
-
-	tempFile := r.dataFilePath + ".tmp"
-	err = os.WriteFile(tempFile, data, 0o644)
-	if err != nil {
-		return fmt.Errorf("failed to write temporary order file: %v", err)
-	}
-
-	err = os.Rename(tempFile, r.dataFilePath)
-	if err != nil {
-		return fmt.Errorf("failed to rename file path: %v", err)
-	}
-
-	return nil
-}
 
 // validateOrder validates order data
 func (r *OrderRepository) validateOrder(order *models.Order) error {
 	if order == nil {
 		return errors.New("order cannot be nil")
 	}
-	if order.ID == "" {
-		return errors.New("order ID cannot be empty")
-	}
 	if order.CustomerName == "" {
 		return errors.New("customer name cannot be empty")
 	}
-	if len(order.Items) == 0 {
-		return errors.New("order must have at least one item")
+	if order.Status == "" {
+		order.Status = "Pending"
 	}
 
 	for i, item := range order.Items {
-		if item.ProductID == "" {
-			return fmt.Errorf("item %d: product ID cannot be empty", i)
+		if item.MenuItemID == "" && item.ProductID == "" {
+			return fmt.Errorf("item %d: menu item ID cannot be empty", i)
 		}
 		if item.Quantity <= 0 {
 			return fmt.Errorf("item %d: quantity must be positive", i)
+		}
+		if item.PriceAtTime < 0 {
+			return fmt.Errorf("item %d: price cannot be negative", i)
+		}
+
+		if item.MenuItemID == "" && item.ProductID != "" {
+			order.Items[i].MenuItemID = item.ProductID
 		}
 	}
 
 	return nil
 }
 
-// backupFile creates a backup of the current data file
-func (r *OrderRepository) backupFile() error {
-	_, err := os.Stat(r.dataFilePath)
-	if os.IsNotExist(err) {
-		return nil
+func (r *OrderRepository) validateOrderForUpdate(order *models.Order, id string) error {
+	if id == "" {
+		return errors.New("order ID cannot be empty")
 	}
-
-	backupPath := r.dataFilePath + ".backup." + time.Now().Format("20060102_150405")
-
-	data, err := os.ReadFile(r.dataFilePath)
-	if err != nil {
-		return fmt.Errorf("failed to read original file: %v", err)
-	}
-
-	err = os.WriteFile(backupPath, data, 0o644)
-	if err != nil {
-		return fmt.Errorf("failed to create backup file: %v", err)
-	}
-
-	return nil
+	return r.validateOrder(order)
 }
