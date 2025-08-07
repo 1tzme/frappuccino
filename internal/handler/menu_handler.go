@@ -10,7 +10,6 @@ package handler
 
 import (
 	"net/http"
-	"regexp"
 	"strings"
 	"time"
 
@@ -98,8 +97,7 @@ func (h *MenuHandler) CreateMenuItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	newID := generateMenuItemID(createdReq.Name)
-	item, err := h.menuService.CreateMenuItem(newID, createdReq)
+	item, err := h.menuService.CreateMenuItem(createdReq)
 	if err != nil {
 		h.logger.Warn("Failed to create menu item", "error", err)
 		writeErrorResponse(w, http.StatusBadRequest, err.Error())
@@ -108,7 +106,7 @@ func (h *MenuHandler) CreateMenuItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSONResponse(w, http.StatusCreated, map[string]interface{}{"id": newID, "message": "Menu item created", "item": item})
+	writeJSONResponse(w, http.StatusCreated, map[string]interface{}{"id": item.ID, "message": "Menu item created", "item": item})
 	reqCtx.StatusCode = http.StatusCreated
 	h.logger.LogResponse(reqCtx)
 }
@@ -182,19 +180,3 @@ func (h *MenuHandler) DeleteMenuItem(w http.ResponseWriter, r *http.Request) {
 // - Return 200 OK with aggregation data or 500 on error
 // - Log HTTP request/response
 // func (h *MenuHandler) GetPopularItems(w http.ResponseWriter, r *http.Request)
-
-// Private helper methods
-
-// generateMenuItemID - Generates menu item ID based on item name
-func generateMenuItemID(name string) string {
-	cleaned := strings.ToLower(name)
-	reg := regexp.MustCompile(`[^a-z0-9]+`)
-	cleaned = reg.ReplaceAllString(cleaned, "_")
-	cleaned = strings.Trim(cleaned, "_")
-
-	if cleaned == "" {
-		cleaned = "ingredient"
-	}
-
-	return cleaned
-}
