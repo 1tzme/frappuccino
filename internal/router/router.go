@@ -65,6 +65,15 @@ func NewRouter(orderHandler *handler.OrderHandler, menuHandler *handler.MenuHand
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	})
 
+	// Number of ordered items: GET numberOfOrderedItems
+	mux.HandleFunc(api+"/orders/numberOfOrderedItems", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			orderHandler.GetNumberOfOrderedItems(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	})
+
 	// Menu collection routes: POST (create), GET (all)
 	mux.HandleFunc(api+"/menu", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {

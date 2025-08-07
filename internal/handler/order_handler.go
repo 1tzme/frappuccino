@@ -261,6 +261,36 @@ func (h *OrderHandler) CloseOrder(w http.ResponseWriter, r *http.Request) {
 	h.logger.LogResponse(reqCtx)
 }
 
+// GetNumberOfOrderedItems handles GET /api/v1/orders/numberOfOrderedItems
+func (h *OrderHandler) GetNumberOfOrderedItems(w http.ResponseWriter, r *http.Request) {
+	reqCtx := &logger.RequestContext{
+		Method: r.Method,
+		Path: r.URL.Path,
+		RemoteAddr: r.RemoteAddr,
+		StartTime: time.Now(),
+	}
+	h.logger.LogRequest(reqCtx)
+
+	query := r.URL.Query()
+	startDate := query.Get("startDate")
+	endDate := query.Get("endDate")
+
+	h.logger.Debug("Processing numberOfOrderedItems request", "startDate", startDate, "endDate", endDate)
+
+	result, err := h.orderService.GetNumberOfOrderedItems(startDate, endDate)
+	if err != nil {
+		h.logger.Warn("Failed to get number of ordered items", "error", err)
+		h.writeErrorResponse(w, http.StatusBadRequest, err.Error())
+		reqCtx.StatusCode = http.StatusBadRequest
+		h.logger.LogResponse(reqCtx)
+		return
+	}
+
+	h.writeJSONResponse(w, http.StatusOK, result)
+	reqCtx.StatusCode = http.StatusOK
+	h.logger.LogResponse(reqCtx)
+}
+
 // Private helper methods
 
 // writeJSONResponse writes JSON response with given status code and data
