@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -56,8 +55,18 @@ func (h *OrderHandler) CreateOrder(w http.ResponseWriter, r *http.Request) {
 	order, err := h.orderService.CreateOrder(createReq)
 	if err != nil {
 		h.logger.Warn("Failed to create order", "error", err)
-		h.writeErrorResponse(w, http.StatusBadRequest, err.Error())
-		reqCtx.StatusCode = http.StatusBadRequest
+		statusCode := http.StatusBadRequest
+
+		if strings.Contains(err.Error(), "not found in menu") {
+			statusCode = http.StatusNotFound
+		} else if strings.Contains(err.Error(), "insufficient inventory") {
+			statusCode = http.StatusConflict
+		} else if strings.Contains(err.Error(), "foreign key") || strings.Contains(err.Error(), "violates") {
+			statusCode = http.StatusUnprocessableEntity
+		}
+
+		h.writeErrorResponse(w, statusCode, err.Error())
+		reqCtx.StatusCode = statusCode
 		h.logger.LogResponse(reqCtx)
 		return
 	}
@@ -155,13 +164,25 @@ func (h *OrderHandler) UpdateOrder(w http.ResponseWriter, r *http.Request) {
 	err := h.orderService.UpdateOrder(id, updateReq)
 	if err != nil {
 		h.logger.Warn("Failed to update order", "id", id, "error", err)
-		h.writeErrorResponse(w, http.StatusBadRequest, err.Error())
-		reqCtx.StatusCode = http.StatusBadRequest
+		statusCode := http.StatusBadRequest
+
+		if strings.Contains(err.Error(), "not found") {
+			statusCode = http.StatusNotFound
+		} else if strings.Contains(err.Error(), "insufficient inventory") {
+			statusCode = http.StatusConflict
+		} else if strings.Contains(err.Error(), "cannot update closed order") {
+			statusCode = http.StatusConflict
+		} else if strings.Contains(err.Error(), "foreign key") || strings.Contains(err.Error(), "violates") {
+			statusCode = http.StatusUnprocessableEntity
+		}
+
+		h.writeErrorResponse(w, statusCode, err.Error())
+		reqCtx.StatusCode = statusCode
 		h.logger.LogResponse(reqCtx)
 		return
 	}
 
-	h.writeJSONResponse(w, http.StatusOK, map[string]interface{}{"id": id, "message": "Order updated"})
+	h.writeJSONResponse(w, http.StatusOK, map[string]interface{}{"order_id": id, "message": "Order updated"})
 	reqCtx.StatusCode = http.StatusOK
 	h.logger.LogResponse(reqCtx)
 }
@@ -188,13 +209,17 @@ func (h *OrderHandler) DeleteOrder(w http.ResponseWriter, r *http.Request) {
 	err := h.orderService.DeleteOrder(id)
 	if err != nil {
 		h.logger.Warn("Failed to delete order", "id", id, "error", err)
-		h.writeErrorResponse(w, http.StatusNotFound, "Order not found")
-		reqCtx.StatusCode = http.StatusNotFound
+		statusCode := http.StatusNotFound
+		if strings.Contains(err.Error(), "foreign key") || strings.Contains(err.Error(), "violates") {
+			statusCode = http.StatusConflict
+		}
+		h.writeErrorResponse(w, statusCode, "Order not found")
+		reqCtx.StatusCode = statusCode
 		h.logger.LogResponse(reqCtx)
 		return
 	}
 
-	h.writeJSONResponse(w, http.StatusNoContent, map[string]interface{}{"id": id, "message": "Order deleted"})
+	h.writeJSONResponse(w, http.StatusNoContent, map[string]interface{}{"order_id": id, "message": "Order deleted"})
 	reqCtx.StatusCode = http.StatusNoContent
 	h.logger.LogResponse(reqCtx)
 }
@@ -221,13 +246,17 @@ func (h *OrderHandler) CloseOrder(w http.ResponseWriter, r *http.Request) {
 	err := h.orderService.CloseOrder(id)
 	if err != nil {
 		h.logger.Warn("Failed to close order", "id", id, "error", err)
-		h.writeErrorResponse(w, http.StatusNotFound, "Order not found")
-		reqCtx.StatusCode = http.StatusNotFound
+		statusCode := http.StatusNotFound
+		if strings.Contains(err.Error(), "already closed") {
+			statusCode = http.StatusConflict
+		}
+		h.writeErrorResponse(w, statusCode, err.Error())
+		reqCtx.StatusCode = statusCode
 		h.logger.LogResponse(reqCtx)
 		return
 	}
 
-	h.writeJSONResponse(w, http.StatusOK, map[string]interface{}{"id": id, "message": "Order closed"})
+	h.writeJSONResponse(w, http.StatusOK, map[string]interface{}{"order_id": id, "message": "Order closed"})
 	reqCtx.StatusCode = http.StatusOK
 	h.logger.LogResponse(reqCtx)
 }
@@ -286,20 +315,10 @@ func (h *OrderHandler) validateOrderID(id string) error {
 		return fmt.Errorf("order ID cannot be empty")
 	}
 
-	// Basic validation - ID should start with "order" prefix
-	if !strings.HasPrefix(id, "order") {
-		return fmt.Errorf("invalid order ID format")
-	}
-
-	// Check that what follows "order" is a number
-	numStr := strings.TrimPrefix(id, "order")
-	if numStr == "" {
-		return fmt.Errorf("order ID missing number")
-	}
-
-	// Validate that the suffix is a valid number
-	if _, err := strconv.Atoi(numStr); err != nil {
-		return fmt.Errorf("invalid order ID format: %s", id)
+	if len(id) < 36 || len(id) > 36 {
+		if !strings.HasPrefix(id, "order") {
+			return fmt.Errorf("invalid order ID format")
+		}
 	}
 
 	return nil

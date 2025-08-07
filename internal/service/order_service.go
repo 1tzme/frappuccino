@@ -10,8 +10,6 @@ package service
 
 import (
 	"fmt"
-	"strconv"
-	"strings"
 	"time"
 
 	"frappuccino/internal/repositories"
@@ -79,37 +77,50 @@ func (s *OrderService) CreateOrder(req CreateOrderRequest) (*models.Order, error
 		return nil, err
 	}
 
-	orderID := s.generateOrderID()
-	order := &models.Order{
-		ID:           orderID,
-		CustomerName: req.CustomerName,
-		Items:        make([]models.OrderItem, len(req.Items)),
-		Status:       "open",
-		CreatedAt:    time.Now().Format(time.RFC3339),
+	totalAmount, err := s.calculateOrderTotal(req.Items)
+	if err != nil {
+		s.logger.Error("Failed to calculate order total", "error", err)
+		return nil, fmt.Errorf("failed to calculate order total: %v", err)
 	}
 
-	// Convert request items to order items
+	order := &models.Order{
+		CustomerName: req.CustomerName,
+		Status:       "pending",
+		TotalAmount:  totalAmount,
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+		Items:        make([]models.OrderItem, len(req.Items)),
+	}
+
 	for i, item := range req.Items {
+		menuItem, err := s.menuRepo.GetByID(item.ProductID)
+		if err != nil {
+			s.logger.Error("Failed to get menu item", "product_id", item.ProductID, "error", err)
+			return nil, fmt.Errorf("menu item %s not found", item.ProductID)
+		}
+
 		order.Items[i] = models.OrderItem{
-			ProductID: item.ProductID,
-			Quantity:  item.Quantity,
+			MenuItemID:  item.ProductID,
+			ProductID:   item.ProductID,
+			Quantity:    item.Quantity,
+			PriceAtTime: menuItem.Price,
 		}
 	}
 
 	// Consume inventory for the order
 	if err := s.consumeInventory(req.Items); err != nil {
-		s.logger.Error("Failed to consume inventory", "order_id", orderID, "error", err)
+		s.logger.Error("Failed to consume inventory", "error", err)
 		return nil, err
 	}
 
 	if err := s.orderRepo.Add(order); err != nil {
 		// Rollback inventory consumption if order creation fails
-		s.logger.Error("Failed to add order, rolling back inventory", "order_id", orderID, "error", err)
+		s.logger.Error("Failed to add order, rolling back inventory", "error", err)
 		s.restoreInventory(req.Items)
 		return nil, err
 	}
 
-	s.logger.Info("Order created", "order_id", orderID)
+	s.logger.Info("Order created", "order_id", order.ID, "total_amount", totalAmount)
 	return order, nil
 }
 
@@ -349,34 +360,17 @@ func (s *OrderService) validateOrderItems(items []CreateOrderItemRequest) error 
 	return nil
 }
 
-// generateOrderID generates a unique order ID
-func (s *OrderService) generateOrderID() string {
-	// Get all existing orders to determine next ID
-	orders, err := s.orderRepo.GetAll()
-	if err != nil {
-		// If we can't get orders, start with order1
-		return "order1"
-	}
-
-	// If no orders exist, start with order1
-	if len(orders) == 0 {
-		return "order1"
-	}
-
-	// Find the highest order number
-	maxOrderNum := 0
-	for _, order := range orders {
-		if strings.HasPrefix(order.ID, "order") {
-			// Extract number from "order123" format
-			numStr := strings.TrimPrefix(order.ID, "order")
-			if num, err := strconv.Atoi(numStr); err == nil && num > maxOrderNum {
-				maxOrderNum = num
-			}
+// calculateOrderTotal calculates the total amount for an order
+func (s *OrderService) calculateOrderTotal(items []CreateOrderItemRequest) (float64, error) {
+	var total float64
+	for i, item := range items {
+		menuItem, err := s.menuRepo.GetByID(item.ProductID)
+		if err != nil {
+			return 0, fmt.Errorf("item %d: product '%s' not found in menu", i+1, item.ProductID)
 		}
+		total += menuItem.Price * float64(item.Quantity)
 	}
-
-	// Return next sequential order ID
-	return fmt.Sprintf("order%d", maxOrderNum+1)
+	return total, nil
 }
 
 // checkInventoryAvailability checks if there's enough inventory for all order items
