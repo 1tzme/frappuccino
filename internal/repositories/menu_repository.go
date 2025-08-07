@@ -80,7 +80,7 @@ func (r *MenuRepository) GetAll() ([]*models.MenuItem, error) {
 	items := []*models.MenuItem{}
 	for rows.Next() {
 		item := &models.MenuItem{}
-		ingredientsJSON := ""
+		var ingredientsJSON string
 
 		err := rows.Scan(&item.ID, &item.Name, &item.Description, &item.Category, &item.Price, &item.Available, &ingredientsJSON)
 		if err != nil {
@@ -88,8 +88,7 @@ func (r *MenuRepository) GetAll() ([]*models.MenuItem, error) {
 			return nil, fmt.Errorf("failed to scan menu item: %v", err)
 		}
 
-		err = r.parseIngredients(ingredientsJSON, &item.Ingredients)
-		if err != nil {
+		if err = r.parseIngredients(ingredientsJSON, &item.Ingredients); err != nil {
 			r.logger.Error("Failed to parse ingredients", "error", err, "item_id", item.ID)
 			return nil, fmt.Errorf("failed to parse ingredients for item %s: %v", item.ID, err)
 		}
@@ -97,8 +96,7 @@ func (r *MenuRepository) GetAll() ([]*models.MenuItem, error) {
 		items = append(items, item)
 	}
 
-	err = rows.Err()
-	if err != nil {
+	if err = rows.Err(); err != nil {
 		r.logger.Error("Error iterating menu rows", "error", err)
 		return nil, fmt.Errorf("error iterating menu rows: %v", err)
 	}
@@ -111,8 +109,7 @@ func (r *MenuRepository) GetAll() ([]*models.MenuItem, error) {
 func (r *MenuRepository) Create(item *models.MenuItem) error {
 	r.logger.Debug("Adding new menu item", "item_name", item.Name)
 
-	err := r.validateMenuItem(item)
-	if err != nil {
+	if err := r.validateMenuItem(item); err != nil {
 		r.logger.Error("Failed to validate menu item", "error", err, "item_name", item.Name)
 		return err
 	}
@@ -139,14 +136,12 @@ func (r *MenuRepository) Create(item *models.MenuItem) error {
 		return fmt.Errorf("failed to add menu item: %v", err)
 	}
 
-	err = r.insertIngredients(tx, item.ID, item.Ingredients)
-	if err != nil {
+	if err = r.insertIngredients(tx, item.ID, item.Ingredients); err != nil {
 		r.logger.Error("Failed to add menu item ingredients", "error", err, "item_id", item.ID)
 		return fmt.Errorf("failed to add menu item ingredients: %v", err)
 	}
 
-	err = tx.Commit()
-	if err != nil {
+	if err = tx.Commit(); err != nil {
 		r.logger.Error("Failed to commit transaction", "error", err)
 		return fmt.Errorf("failed to commit transaction: %v", err)
 	}
@@ -193,20 +188,17 @@ func (r *MenuRepository) Update(id string, item *models.MenuItem) error {
 		return fmt.Errorf("menu item with id %s not found", id)
 	}
 
-	err = r.deleteIngredients(tx, id)
-	if err != nil {
+	if err = r.deleteIngredients(tx, id); err != nil {
 		r.logger.Error("Failed to delete existing ingredients", "error", err, "item_id", id)
 		return fmt.Errorf("failed to delete existing ingredients: %v", err)
 	}
 
-	err = r.insertIngredients(tx, id, item.Ingredients)
-	if err != nil {
+	if err = r.insertIngredients(tx, id, item.Ingredients); err != nil {
 		r.logger.Error("Failed to update menu item ingredients", "error", err, "item_id", id)
 		return fmt.Errorf("failed to update menu item ingredients: %v", err)
 	}
 
-	err = tx.Commit()
-	if err != nil {
+	if err = tx.Commit(); err != nil {
 		r.logger.Error("Failed to commit transaction", "error", err, "item_id", id)
 		return fmt.Errorf("failed to commit transaction: %v", err)
 	}
@@ -226,15 +218,13 @@ func (r *MenuRepository) Delete(id string) error {
 	}
 	defer tx.Rollback()
 
-	err = r.deleteIngredients(tx, id)
-	if err != nil {
+	if err = r.deleteIngredients(tx, id); err != nil {
 		r.logger.Error("Failed to delete menu item ingredients", "error", err, "item_id", id)
 		return fmt.Errorf("failed to delete menu item ingredients: %v", err)
 	}
 
 	query := `DELETE FROM menu_items WHERE id = $1`
 	result, err := tx.Exec(query, id)
-
 	if err != nil {
         r.logger.Error("Failed to delete menu item", "error", err, "item_id", id)
         return fmt.Errorf("failed to delete menu item: %v", err)
@@ -285,7 +275,6 @@ func (r *MenuRepository) GetByID(id string) (*models.MenuItem, error) {
     var ingredientsJSON string
 
     err := row.Scan(&item.ID, &item.Name, &item.Description, &item.Category, &item.Price, &item.Available, &ingredientsJSON)
-
     if err != nil {
         if err == sql.ErrNoRows {
             r.logger.Warn("Menu item not found", "item_id", id)
@@ -323,7 +312,7 @@ func (r *MenuRepository) insertIngredients(tx *sql.Tx, menuItemId string, ingred
 	}
 
 	query := `
-		INSERT INTO menu_item_ingredients (menu_item_id, ingredient_id, quantity)
+		INSERT INTO menu_item_ingredients (menu_item_id, ingredient_id, required_quantity)
 		VALUES ($1, $2, $3)
 	`
 
