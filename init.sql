@@ -1,3 +1,8 @@
+-- Enable UUID extension
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+-- Enable trigram extension for text search
+CREATE EXTENSION IF NOT EXISTS "pg_trgm";
+
 CREATE TYPE order_status AS ENUM ('pending', 'preparing',  'ready', 'closed', 'cancelled');
 
 CREATE TYPE item_size AS ENUM ('small', 'medium', 'large', 'extra_large');
@@ -26,7 +31,7 @@ CREATE TABLE menu_items (
     metadata JSONB DEFAULT '{}',
     tags TEXT[] DEFAULT '{}',
     allergens TEXT[] DEFAULT '{}',
-    available_sizes item_size[] DEFAULT ARRAY['medium'],
+    available_sizes item_size[] DEFAULT ARRAY['medium']::item_size[],
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
