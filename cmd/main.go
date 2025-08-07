@@ -95,7 +95,7 @@ func main() {
 	orderRepo := repositories.NewOrderRepository(appLogger, db)
 	menuRepo := repositories.NewMenuRepository(appLogger, db)
 	inventoryRepo := repositories.NewInventoryRepository(appLogger, db)
-	aggregationRepo := repositories.NewAggregationRepository(orderRepo, menuRepo, appLogger)
+	aggregationRepo := repositories.NewAggregationRepository(db, appLogger)
 
 	// Initialize services with logger
 	// TODO: Services updated for PostgreSQL transition
