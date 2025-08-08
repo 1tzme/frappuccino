@@ -321,7 +321,12 @@ func (r *InventoryRepository) BatchUpdateInventory(updates map[string]float64) (
 		r.logger.Error("Failed to begin inventory update transaction", "error", err)
 		return nil, fmt.Errorf("failed to begin transaction: %v", err)
 	}
-	defer tx.Rollback()
+	defer func() {
+		if err != nil {
+			r.logger.Warn("Rolling back inventory transaction due to error", "error", err)
+			tx.Rollback()
+		}
+	}()
 
 	results := make([]models.InventoryUpdateResult, 0)
 
@@ -342,17 +347,17 @@ func (r *InventoryRepository) BatchUpdateInventory(updates map[string]float64) (
 		}
 
 		result := models.InventoryUpdateResult{
-			IngredientID:   ingredientID,
-			Name:          name,
-			QuantityUsed:  quantityUsed,
-			Remaining:     remainingQuantity,
+			IngredientID: ingredientID,
+			Name:         name,
+			QuantityUsed: quantityUsed,
+			Remaining:    remainingQuantity,
 		}
 		results = append(results, result)
 
-		r.logger.Debug("Updated inventory item", 
-			"ingredient_id", ingredientID, 
-			"name", name, 
-			"used", quantityUsed, 
+		r.logger.Debug("Updated inventory item",
+			"ingredient_id", ingredientID,
+			"name", name,
+			"used", quantityUsed,
 			"remaining", remainingQuantity)
 	}
 
@@ -362,6 +367,7 @@ func (r *InventoryRepository) BatchUpdateInventory(updates map[string]float64) (
 		return nil, fmt.Errorf("failed to commit inventory updates: %v", err)
 	}
 
+	r.logger.Info("Successfully committed inventory transaction", "updates_count", len(results))
 	r.logger.Info("Batch updated inventory", "updates_count", len(results))
 	return results, nil
 }

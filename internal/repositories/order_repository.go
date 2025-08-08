@@ -71,7 +71,12 @@ func (r *OrderRepository) Add(order *models.Order) error {
 		r.logger.Error("Failed to begin transaction", "error", err)
 		return fmt.Errorf("failed to begin transaction: %v", err)
 	}
-	defer tx.Rollback()
+	defer func() {
+		if err != nil {
+			r.logger.Warn("Rolling back order creation transaction due to error", "error", err, "customer_name", order.CustomerName)
+			tx.Rollback()
+		}
+	}()
 
 	query := `
 		INSERT INTO orders (customer_name, status, total_amount, special_instructions)
@@ -115,6 +120,7 @@ func (r *OrderRepository) Add(order *models.Order) error {
 		return fmt.Errorf("failed to commit transaction: %v", err)
 	}
 
+	r.logger.Info("Successfully committed order creation transaction", "order_id", order.ID, "customer_name", order.CustomerName, "items_count", len(order.Items))
 	r.logger.Info("Added new order", "order_id", order.ID, "customer_name", order.CustomerName)
 	return nil
 }
@@ -268,7 +274,12 @@ func (r *OrderRepository) Update(id string, order *models.Order) error {
 		r.logger.Error("Failed to begin transaction", "error", err)
 		return fmt.Errorf("failed to begin transaction: %v", err)
 	}
-	defer tx.Rollback()
+	defer func() {
+		if err != nil {
+			r.logger.Warn("Rolling back order update transaction due to error", "error", err, "order_id", id)
+			tx.Rollback()
+		}
+	}()
 
 	query := `
 		UPDATE orders
@@ -317,6 +328,7 @@ func (r *OrderRepository) Update(id string, order *models.Order) error {
 		return fmt.Errorf("failed to commit transaction: %v", err)
 	}
 
+	r.logger.Info("Successfully committed order update transaction", "order_id", id, "customer_name", order.CustomerName, "items_count", len(order.Items))
 	r.logger.Info("Updated order", "order_id", id, "customer_name", order.CustomerName)
 	return nil
 }
@@ -518,7 +530,7 @@ func (r *OrderRepository) GetInventoryRequirements(orders []*models.Order) (map[
 			for rows.Next() {
 				var ingredientID string
 				var quantity float64
-				
+
 				err := rows.Scan(&ingredientID, &quantity)
 				if err != nil {
 					r.logger.Error("Failed to scan ingredient requirement", "error", err)

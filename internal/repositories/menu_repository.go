@@ -119,7 +119,12 @@ func (r *MenuRepository) Create(item *models.MenuItem) error {
 		r.logger.Error("Failed to begin transaction", "error", err)
 		return fmt.Errorf("failed to begin transaction: %v", err)
 	}
-	defer tx.Rollback()
+	defer func() {
+		if err != nil {
+			r.logger.Warn("Rolling back menu item creation transaction due to error", "error", err, "item_name", item.Name)
+			tx.Rollback()
+		}
+	}()
 
 	query := `
         INSERT INTO menu_items (id, name, description, category, price, available)
@@ -146,6 +151,7 @@ func (r *MenuRepository) Create(item *models.MenuItem) error {
 		return fmt.Errorf("failed to commit transaction: %v", err)
 	}
 
+	r.logger.Info("Successfully committed menu item creation transaction", "item_id", item.ID, "name", item.Name)
 	r.logger.Info("Added new menu item", "item_id", item.ID, "name", item.Name)
 	return nil
 }
@@ -164,7 +170,12 @@ func (r *MenuRepository) Update(id string, item *models.MenuItem) error {
 		r.logger.Error("Failed to begin transaction", "error", err)
 		return fmt.Errorf("failed to begin transaction: %v", err)
 	}
-	defer tx.Rollback()
+	defer func() {
+		if err != nil {
+			r.logger.Warn("Rolling back menu item update transaction due to error", "error", err, "item_id", id)
+			tx.Rollback()
+		}
+	}()
 
 	query := `
         UPDATE menu_items
@@ -172,7 +183,7 @@ func (r *MenuRepository) Update(id string, item *models.MenuItem) error {
         WHERE id = $6
     `
 
-    result, err := tx.Exec(query, item.Name, item.Description, item.Category, item.Price, item.Available, id)
+	result, err := tx.Exec(query, item.Name, item.Description, item.Category, item.Price, item.Available, id)
 	if err != nil {
 		r.logger.Error("Failed to update menu item", "error", err, "item_id", item.ID)
 		return fmt.Errorf("failed to update menu item: %v", err)
@@ -216,7 +227,11 @@ func (r *MenuRepository) Delete(id string) error {
 		r.logger.Error("Failed to begin transaction", "error", err)
 		return fmt.Errorf("failed to begin transaction: %v", err)
 	}
-	defer tx.Rollback()
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		}
+	}()
 
 	if err = r.deleteIngredients(tx, id); err != nil {
 		r.logger.Error("Failed to delete menu item ingredients", "error", err, "item_id", id)
@@ -226,34 +241,34 @@ func (r *MenuRepository) Delete(id string) error {
 	query := `DELETE FROM menu_items WHERE id = $1`
 	result, err := tx.Exec(query, id)
 	if err != nil {
-        r.logger.Error("Failed to delete menu item", "error", err, "item_id", id)
-        return fmt.Errorf("failed to delete menu item: %v", err)
-    }
+		r.logger.Error("Failed to delete menu item", "error", err, "item_id", id)
+		return fmt.Errorf("failed to delete menu item: %v", err)
+	}
 
-    rowsAffected, err := result.RowsAffected()
-    if err != nil {
-        r.logger.Error("Failed to get rows affected", "error", err, "item_id", id)
-        return fmt.Errorf("failed to get rows affected: %v", err)
-    }
-    if rowsAffected == 0 {
-        r.logger.Warn("Attempted to delete non-existent menu item", "item_id", id)
-        return fmt.Errorf("menu item with id %s not found", id)
-    }
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		r.logger.Error("Failed to get rows affected", "error", err, "item_id", id)
+		return fmt.Errorf("failed to get rows affected: %v", err)
+	}
+	if rowsAffected == 0 {
+		r.logger.Warn("Attempted to delete non-existent menu item", "item_id", id)
+		return fmt.Errorf("menu item with id %s not found", id)
+	}
 
-    if err := tx.Commit(); err != nil {
-        r.logger.Error("Failed to commit transaction", "error", err, "item_id", id)
-        return fmt.Errorf("failed to commit transaction: %v", err)
-    }
+	if err := tx.Commit(); err != nil {
+		r.logger.Error("Failed to commit transaction", "error", err, "item_id", id)
+		return fmt.Errorf("failed to commit transaction: %v", err)
+	}
 
-    r.logger.Info("Deleted menu item", "item_id", id)
-    return nil
+	r.logger.Info("Deleted menu item", "item_id", id)
+	return nil
 }
 
 // GetByID - retrieves menu item by ID
 func (r *MenuRepository) GetByID(id string) (*models.MenuItem, error) {
 	r.logger.Debug("Retrieving menu item from database", "item_id", id)
 
-    query := `
+	query := `
         SELECT m.id, m.name, m.description, m.category, m.price, m.available,
                COALESCE(
                    json_agg(
@@ -271,26 +286,26 @@ func (r *MenuRepository) GetByID(id string) (*models.MenuItem, error) {
 
 	row := r.db.QueryRow(query, id)
 
-    item := &models.MenuItem{}
-    var ingredientsJSON string
+	item := &models.MenuItem{}
+	var ingredientsJSON string
 
-    err := row.Scan(&item.ID, &item.Name, &item.Description, &item.Category, &item.Price, &item.Available, &ingredientsJSON)
-    if err != nil {
-        if err == sql.ErrNoRows {
-            r.logger.Warn("Menu item not found", "item_id", id)
-            return nil, fmt.Errorf("menu item with id %s not found", id)
-        }
-        r.logger.Error("Failed to retrieve menu item", "error", err, "item_id", id)
-        return nil, fmt.Errorf("failed to retrieve menu item: %v", err)
-    }
+	err := row.Scan(&item.ID, &item.Name, &item.Description, &item.Category, &item.Price, &item.Available, &ingredientsJSON)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			r.logger.Warn("Menu item not found", "item_id", id)
+			return nil, fmt.Errorf("menu item with id %s not found", id)
+		}
+		r.logger.Error("Failed to retrieve menu item", "error", err, "item_id", id)
+		return nil, fmt.Errorf("failed to retrieve menu item: %v", err)
+	}
 
-    if err := r.parseIngredients(ingredientsJSON, &item.Ingredients); err != nil {
-        r.logger.Error("Failed to parse ingredients", "error", err, "item_id", item.ID)
-        return nil, fmt.Errorf("failed to parse ingredients for item %s: %v", item.ID, err)
-    }
+	if err := r.parseIngredients(ingredientsJSON, &item.Ingredients); err != nil {
+		r.logger.Error("Failed to parse ingredients", "error", err, "item_id", item.ID)
+		return nil, fmt.Errorf("failed to parse ingredients for item %s: %v", item.ID, err)
+	}
 
-    r.logger.Debug("Retrieved menu item", "item_id", id, "name", item.Name)
-    return item, nil
+	r.logger.Debug("Retrieved menu item", "item_id", id, "name", item.Name)
+	return item, nil
 }
 
 // TODO: Implement GetPopularItems method - Get popular menu items aggregation
