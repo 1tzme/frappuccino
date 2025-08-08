@@ -43,6 +43,7 @@ type OrderServiceInterface interface {
 	DeleteOrder(id string) error
 	CloseOrder(id string) error
 	GetNumberOfOrderedItems(startDate, endDate string) (map[string]int, error)
+	BatchProcessOrders(req models.BatchOrderRequest) (*models.BatchProcessResponse, error)
 }
 
 // OrderService struct
