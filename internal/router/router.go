@@ -125,5 +125,14 @@ func NewRouter(orderHandler *handler.OrderHandler, menuHandler *handler.MenuHand
 		}
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	})
+
+	mux.HandleFunc(api+"/inventory/getLeftOvers", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			inventoryHandler.GetLeftOvers(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	})
+	
 	return mux
 }
