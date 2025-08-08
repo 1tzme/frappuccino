@@ -31,7 +31,30 @@ type InventoryServiceInterface interface {
 	CreateInventoryItem(req UpdateInventoryItemRequest) (*models.InventoryItem, error)
 	GetInventoryItem(id string) (*models.InventoryItem, error)
 	DeleteInventoryItem(id string) error
+	GetLeftOvers(req GetLeftOversRequest) (*GetLeftOversResponse, error)
 }
+
+type GetLeftOversRequest struct {
+	SortBy   string `json:"sortBy"`
+	Page     int    `json:"page"`
+	PageSize int    `json:"pageSize"`
+}
+
+type LeftOverItem struct {
+	Name     string  `json:"name"`
+	Quantity float64 `json:"quantity"`
+	Price    float64 `json:"price"` // using min_threshold as price for now
+}
+
+type GetLeftOversResponse struct {
+	CurrentPage  int            `json:"currentPage"`
+	HasNextPage  bool           `json:"hasNextPage"`
+	PageSize     int            `json:"pageSize"`
+	TotalPages   int            `json:"totalPages"`
+	Data         []LeftOverItem `json:"data"`
+}
+
+	//
 
 // CreateInventoryItem adds a new inventory item
 func (s *InventoryService) CreateInventoryItem(req UpdateInventoryItemRequest) (*models.InventoryItem, error) {
@@ -157,6 +180,63 @@ func (s *InventoryService) UpdateInventoryItem(id string, req UpdateInventoryIte
 
 	s.logger.Info("Inventory item updated", "id", id)
 	return nil
+}
+
+// GetLeftOvers retrieves inventory leftovers with pagination and sorting
+func (s *InventoryService) GetLeftOvers(req GetLeftOversRequest) (*GetLeftOversResponse, error) {
+	s.logger.Info("Getting inventory leftovers", "sortBy", req.SortBy, "page", req.Page, "pageSize", req.PageSize)
+
+	if req.Page <= 0 {
+		req.Page = 1
+	}
+	if req.PageSize <= 0 {
+		req.PageSize = 10
+	}
+	if req.SortBy == "" {
+		req.SortBy = "quantity"
+	}
+
+	validSorts := []string{"price", "quantity"}
+	sortValid := false
+	for _, sort := range validSorts {
+		if req.SortBy == sort {
+			sortValid = true
+			break
+		}
+	}
+	if !sortValid {
+		s.logger.Warn("Invalid sort parameter, using default", "sortBy", req.SortBy)
+		req.SortBy = "quantity"
+	}
+
+	items, totalRecords, err := s.inventoryRepo.GetLeftOvers(req.SortBy, req.Page, req.PageSize)
+	if err != nil {
+		s.logger.Error("Failed to get leftovers from repository", "error", err)
+		return nil, fmt.Errorf("failed to get inventory leftovers: %v", err)
+	}
+
+	totalPages := (totalRecords + req.PageSize - 1) / req.PageSize
+	hasNextPage := req.Page < totalPages
+
+	data := make([]LeftOverItem, len(items))
+	for i, item := range items {
+		data[i] = LeftOverItem{
+			Name:     item.Name,
+			Quantity: item.Quantity,
+			Price:    item.MinThreshold,
+		}
+	}
+
+	response := &GetLeftOversResponse{
+		CurrentPage: req.Page,
+		HasNextPage: hasNextPage,
+		PageSize:    req.PageSize,
+		TotalPages:  totalPages,
+		Data:        data,
+	}
+
+	s.logger.Info("Retrieved inventory leftovers", "count", len(data), "totalPages", totalPages)
+	return response, nil
 }
 
 // Private business logic methods

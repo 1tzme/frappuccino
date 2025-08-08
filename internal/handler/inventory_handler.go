@@ -11,6 +11,7 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"time"
 
 	"frappuccino/internal/service"
@@ -175,6 +176,57 @@ func (h *InventoryHandler) UpdateInventoryItem(w http.ResponseWriter, r *http.Re
 	}
 
 	writeJSONResponse(w, http.StatusOK, map[string]interface{}{"id": id, "message": "Inventory item updated"})
+	reqCtx.StatusCode = http.StatusOK
+	h.logger.LogResponse(reqCtx)
+}
+
+// GetLeftOvers handles GET /api/v1/inventory/getLeftOvers
+func (h *InventoryHandler) GetLeftOvers(w http.ResponseWriter, r *http.Request) {
+	reqCtx := &logger.RequestContext{
+		Method:     r.Method,
+		Path:       r.URL.Path,
+		RemoteAddr: r.RemoteAddr,
+		StartTime:  time.Now(),
+	}
+	h.logger.LogRequest(reqCtx)
+
+	// Parse query parameters
+	query := r.URL.Query()
+	sortBy := query.Get("sortBy")
+	pageStr := query.Get("page")
+	pageSizeStr := query.Get("pageSize")
+
+	// Convert and validate parameters
+	page := 1
+	if pageStr != "" {
+		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
+			page = p
+		}
+	}
+
+	pageSize := 10
+	if pageSizeStr != "" {
+		if ps, err := strconv.Atoi(pageSizeStr); err == nil && ps > 0 {
+			pageSize = ps
+		}
+	}
+
+	req := service.GetLeftOversRequest{
+		SortBy:   sortBy,
+		Page:     page,
+		PageSize: pageSize,
+	}
+
+	response, err := h.inventoryService.GetLeftOvers(req)
+	if err != nil {
+		h.logger.Error("Failed to get inventory leftovers", "error", err)
+		writeErrorResponse(w, http.StatusInternalServerError, "Failed to get inventory leftovers")
+		reqCtx.StatusCode = http.StatusInternalServerError
+		h.logger.LogResponse(reqCtx)
+		return
+	}
+
+	writeJSONResponse(w, http.StatusOK, response)
 	reqCtx.StatusCode = http.StatusOK
 	h.logger.LogResponse(reqCtx)
 }
