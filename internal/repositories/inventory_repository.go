@@ -29,6 +29,8 @@ type InventoryRepositoryInterface interface {
 	GetByID(id string) (*models.InventoryItem, error)
 	Delete(id string) error
 	GetLeftOvers(sortBy string, page, pageSize int) ([]*models.InventoryItem, int, error)
+	CheckInventoryAvailability(requirements map[string]float64) (map[string]*models.InventoryItem, error)
+	BatchUpdateInventory(updates map[string]float64) ([]models.InventoryUpdateResult, error)
 }
 
 // Add adds a new inventory item
@@ -232,10 +234,10 @@ func (r *InventoryRepository) GetLeftOvers(sortBy string, page, pageSize int) ([
 		"price":    "min_threshold",
 		"quantity": "quantity",
 	}
-	
+
 	sortColumn, exists := validSortColumns[sortBy]
 	if !exists {
-		sortColumn = "name" 
+		sortColumn = "name"
 	}
 
 	offset := (page - 1) * pageSize
@@ -279,6 +281,89 @@ func (r *InventoryRepository) GetLeftOvers(sortBy string, page, pageSize int) ([
 
 	r.logger.Info("Retrieved inventory leftovers", "count", len(items), "total", totalRecords)
 	return items, totalRecords, nil
+}
+
+// CheckInventoryAvailability checks if there's sufficient inventory for given requirements
+func (r *InventoryRepository) CheckInventoryAvailability(requirements map[string]float64) (map[string]*models.InventoryItem, error) {
+	r.logger.Debug("Checking inventory availability", "ingredients_count", len(requirements))
+
+	inventory := make(map[string]*models.InventoryItem)
+	insufficientItems := make([]string, 0)
+
+	for ingredientID, requiredQuantity := range requirements {
+		item, err := r.GetByID(ingredientID)
+		if err != nil {
+			r.logger.Warn("Ingredient not found in inventory", "ingredient_id", ingredientID)
+			return nil, fmt.Errorf("ingredient %s not found in inventory", ingredientID)
+		}
+
+		if item.Quantity < requiredQuantity {
+			insufficientItems = append(insufficientItems, fmt.Sprintf("%s (need %.2f, have %.2f)",
+				item.Name, requiredQuantity, item.Quantity))
+		}
+
+		inventory[ingredientID] = item
+	}
+
+	if len(insufficientItems) > 0 {
+		return nil, fmt.Errorf("insufficient inventory for: %s", strings.Join(insufficientItems, ", "))
+	}
+
+	r.logger.Info("Inventory availability check passed", "ingredients_count", len(inventory))
+	return inventory, nil
+}
+
+func (r *InventoryRepository) BatchUpdateInventory(updates map[string]float64) ([]models.InventoryUpdateResult, error) {
+	r.logger.Debug("Batch updating inventory", "updates_count", len(updates))
+
+	tx, err := r.db.Begin()
+	if err != nil {
+		r.logger.Error("Failed to begin inventory update transaction", "error", err)
+		return nil, fmt.Errorf("failed to begin transaction: %v", err)
+	}
+	defer tx.Rollback()
+
+	results := make([]models.InventoryUpdateResult, 0)
+
+	query := `
+		UPDATE inventory 
+		SET quantity = quantity - $1
+		WHERE id = $2
+		RETURNING name, quantity`
+
+	for ingredientID, quantityUsed := range updates {
+		var name string
+		var remainingQuantity float64
+
+		err := tx.QueryRow(query, quantityUsed, ingredientID).Scan(&name, &remainingQuantity)
+		if err != nil {
+			r.logger.Error("Failed to update inventory item", "error", err, "ingredient_id", ingredientID)
+			return nil, fmt.Errorf("failed to update inventory for ingredient %s: %v", ingredientID, err)
+		}
+
+		result := models.InventoryUpdateResult{
+			IngredientID:   ingredientID,
+			Name:          name,
+			QuantityUsed:  quantityUsed,
+			Remaining:     remainingQuantity,
+		}
+		results = append(results, result)
+
+		r.logger.Debug("Updated inventory item", 
+			"ingredient_id", ingredientID, 
+			"name", name, 
+			"used", quantityUsed, 
+			"remaining", remainingQuantity)
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		r.logger.Error("Failed to commit inventory update transaction", "error", err)
+		return nil, fmt.Errorf("failed to commit inventory updates: %v", err)
+	}
+
+	r.logger.Info("Batch updated inventory", "updates_count", len(results))
+	return results, nil
 }
 
 func (r *InventoryRepository) validateInventoryItemForUpdate(item *models.InventoryItem, id string) error {

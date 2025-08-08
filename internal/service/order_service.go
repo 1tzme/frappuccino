@@ -406,7 +406,7 @@ func (s *OrderService) BatchProcessOrders(req models.BatchOrderRequest) (*models
 	}
 
 	// Check if we have sufficient inventory
-	inventoryMap, err := s.inventoryRepo.CheckInventoryAvailability(inventoryRequirements)
+	_, err = s.inventoryRepo.CheckInventoryAvailability(inventoryRequirements)
 	if err != nil {
 		s.logger.Warn("Insufficient inventory for batch orders", "error", err)
 
@@ -691,7 +691,6 @@ func (s *OrderService) parseDate(dateStr string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("unable to parse date: %s", dateStr)
 }
 
-
 func (s *OrderService) validateBatchOrderRequest(orderReq models.BatchOrderItem, index int) error {
 	if orderReq.CustomerName == "" {
 		return fmt.Errorf("customer name is required")
@@ -719,7 +718,7 @@ func (s *OrderService) validateBatchOrderRequest(orderReq models.BatchOrderItem,
 
 func (s *OrderService) calculateBatchOrderTotal(items []models.BatchOrderItemDetail) (float64, error) {
 	var total float64
-	
+
 	for i, item := range items {
 		menuItem, err := s.menuRepo.GetByID(item.MenuItemID)
 		if err != nil {

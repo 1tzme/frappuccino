@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"frappuccino/internal/service"
+	"frappuccino/models"
 	"frappuccino/pkg/logger"
 )
 
