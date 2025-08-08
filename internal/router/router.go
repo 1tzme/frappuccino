@@ -28,6 +28,24 @@ func NewRouter(orderHandler *handler.OrderHandler, menuHandler *handler.MenuHand
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	})
 
+	// Full text search endpoint
+	mux.HandleFunc(api+"/reports/search", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			aggregationHandler.SearchFullText(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	})
+
+	// Ordered items by period endpoint
+	mux.HandleFunc(api+"/reports/orderedItemsByPeriod", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			aggregationHandler.GetOrderedItemsByPeriod(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	})
+
 	// Order collection routes: POST (create), GET (all)
 	mux.HandleFunc(api+"/orders", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
