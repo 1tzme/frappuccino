@@ -28,6 +28,7 @@ type InventoryRepositoryInterface interface {
 	Add(item *models.InventoryItem) error
 	GetByID(id string) (*models.InventoryItem, error)
 	Delete(id string) error
+	GetLeftOvers(sortBy string, page, pageSize int) ([]*models.InventoryItem, int, error)
 }
 
 // Add adds a new inventory item
@@ -221,6 +222,63 @@ func (r *InventoryRepository) Update(id string, item *models.InventoryItem) erro
 
 	r.logger.Info("Updated inventory item", "item_id", id, "name", item.Name)
 	return nil
+}
+
+// GetLeftOvers retrieves inventory items with pagination and sorting
+func (r *InventoryRepository) GetLeftOvers(sortBy string, page, pageSize int) ([]*models.InventoryItem, int, error) {
+	r.logger.Debug("Retrieving inventory leftovers", "sortBy", sortBy, "page", page, "pageSize", pageSize)
+
+	validSortColumns := map[string]string{
+		"price":    "min_threshold",
+		"quantity": "quantity",
+	}
+	
+	sortColumn, exists := validSortColumns[sortBy]
+	if !exists {
+		sortColumn = "name" 
+	}
+
+	offset := (page - 1) * pageSize
+
+	countQuery := `SELECT COUNT(*) FROM inventory`
+	var totalRecords int
+	err := r.db.QueryRow(countQuery).Scan(&totalRecords)
+	if err != nil {
+		r.logger.Error("Failed to count inventory items", "error", err)
+		return nil, 0, fmt.Errorf("failed to count inventory items: %v", err)
+	}
+
+	query := fmt.Sprintf(`
+		SELECT id, name, quantity, unit, min_threshold 
+		FROM inventory 
+		ORDER BY %s ASC
+		LIMIT $1 OFFSET $2`, sortColumn)
+
+	rows, err := r.db.Query(query, pageSize, offset)
+	if err != nil {
+		r.logger.Error("Failed to query inventory leftovers", "error", err)
+		return nil, 0, fmt.Errorf("failed to query inventory leftovers: %v", err)
+	}
+	defer rows.Close()
+
+	var items []*models.InventoryItem
+	for rows.Next() {
+		item := &models.InventoryItem{}
+		err := rows.Scan(&item.IngredientID, &item.Name, &item.Quantity, &item.Unit, &item.MinThreshold)
+		if err != nil {
+			r.logger.Error("Failed to scan inventory item", "error", err)
+			return nil, 0, fmt.Errorf("failed to scan inventory item: %v", err)
+		}
+		items = append(items, item)
+	}
+
+	if err = rows.Err(); err != nil {
+		r.logger.Error("Error iterating inventory rows", "error", err)
+		return nil, 0, fmt.Errorf("error iterating inventory rows: %v", err)
+	}
+
+	r.logger.Info("Retrieved inventory leftovers", "count", len(items), "total", totalRecords)
+	return items, totalRecords, nil
 }
 
 func (r *InventoryRepository) validateInventoryItemForUpdate(item *models.InventoryItem, id string) error {
