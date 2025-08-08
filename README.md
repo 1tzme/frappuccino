@@ -1,5 +1,7 @@
 # Frappuccino - Coffee Shop Management System
 
+![бекулумба](тяги-бархатные.gif)
+
 ## Project Overview
 
 Frappuccino is a coffee shop management system built with Go using a three-layered architecture pattern. The application provides HTTP endpoints for managing orders, menu items, and inventory with **PostgreSQL database persistence**, comprehensive transaction management, and business analytics capabilities.
