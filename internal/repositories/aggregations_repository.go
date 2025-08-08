@@ -11,11 +11,12 @@ package repositories
 import (
 	"database/sql"
 	"fmt"
+	"strings"
+	"time"
+
 	"frappuccino/models"
 	"frappuccino/pkg/database"
 	"frappuccino/pkg/logger"
-	"strings"
-	"time"
 )
 
 type AggregationRepositoryInterface interface {

@@ -23,7 +23,7 @@ type BatchOrderRequest struct {
 }
 
 type BatchOrderItem struct {
-	CustomerName string             `json:"customer_name"`
+	CustomerName string                 `json:"customer_name"`
 	Items        []BatchOrderItemDetail `json:"items"`
 }
 
@@ -41,11 +41,11 @@ type BatchProcessResult struct {
 }
 
 type BatchProcessSummary struct {
-	TotalOrders       int                     `json:"total_orders"`
-	Accepted          int                     `json:"accepted"`
-	Rejected          int                     `json:"rejected"`
-	TotalRevenue      float64                 `json:"total_revenue"`
-	InventoryUpdates  []InventoryUpdateResult `json:"inventory_updates"`
+	TotalOrders      int                     `json:"total_orders"`
+	Accepted         int                     `json:"accepted"`
+	Rejected         int                     `json:"rejected"`
+	TotalRevenue     float64                 `json:"total_revenue"`
+	InventoryUpdates []InventoryUpdateResult `json:"inventory_updates"`
 }
 
 type BatchProcessResponse struct {

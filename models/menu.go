@@ -2,7 +2,7 @@ package models
 
 // TODO: Transition State: JSON → PostgreSQL
 // DEPRECATED: Update menu models for database relationships and constraints
-// 1. Add database column mappings with `db:"column_name"` tags  
+// 1. Add database column mappings with `db:"column_name"` tags
 // 2. Implement proper relationship between menu_items and ingredients tables
 // 3. Add database constraints for price validation and category enum
 // 4. Update timestamp fields to use time.Time with proper database mapping

@@ -47,14 +47,14 @@ type LeftOverItem struct {
 }
 
 type GetLeftOversResponse struct {
-	CurrentPage  int            `json:"currentPage"`
-	HasNextPage  bool           `json:"hasNextPage"`
-	PageSize     int            `json:"pageSize"`
-	TotalPages   int            `json:"totalPages"`
-	Data         []LeftOverItem `json:"data"`
+	CurrentPage int            `json:"currentPage"`
+	HasNextPage bool           `json:"hasNextPage"`
+	PageSize    int            `json:"pageSize"`
+	TotalPages  int            `json:"totalPages"`
+	Data        []LeftOverItem `json:"data"`
 }
 
-	//
+//
 
 // CreateInventoryItem adds a new inventory item
 func (s *InventoryService) CreateInventoryItem(req UpdateInventoryItemRequest) (*models.InventoryItem, error) {

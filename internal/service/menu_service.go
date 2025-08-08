@@ -166,15 +166,15 @@ func (s *MenuService) UpdateMenuItem(id string, req UpdateMenuItemRequest) error
 	}
 
 	if s.hasMenuItemChanged(existingItem, updatedItem) {
-        if err := s.menuRepo.Update(id, updatedItem); err != nil {
-            s.logger.Error("Failed to update menu item", "id", id, "error", err)
-            return err
-        }
-        s.logger.Info("Menu item updated successfully", "id", id)
-    } else {
-        s.logger.Warn("Update canceled: no changes detected", "id", id)
-        return fmt.Errorf("no changes detected for menu item with ID %s", id)
-    }
+		if err := s.menuRepo.Update(id, updatedItem); err != nil {
+			s.logger.Error("Failed to update menu item", "id", id, "error", err)
+			return err
+		}
+		s.logger.Info("Menu item updated successfully", "id", id)
+	} else {
+		s.logger.Warn("Update canceled: no changes detected", "id", id)
+		return fmt.Errorf("no changes detected for menu item with ID %s", id)
+	}
 
 	s.logger.Info("Menu item updated successfully", "id", id, "name", req.Name)
 	return nil
@@ -348,15 +348,15 @@ func (s *MenuService) generateMenuItemID(name string) string {
 	cleaned = strings.ReplaceAll(cleaned, " ", "_")
 
 	result := ""
-    for _, char := range cleaned {
-        if (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') || char == '_' {
-            result += string(char)
-        }
-    }
-    
-    if result == "" {
-        result = "menu_item"
-    }
-    
-    return result
+	for _, char := range cleaned {
+		if (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') || char == '_' {
+			result += string(char)
+		}
+	}
+
+	if result == "" {
+		result = "menu_item"
+	}
+
+	return result
 }

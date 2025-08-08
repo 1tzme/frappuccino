@@ -169,6 +169,6 @@ func NewRouter(orderHandler *handler.OrderHandler, menuHandler *handler.MenuHand
 		}
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	})
-	
+
 	return mux
 }

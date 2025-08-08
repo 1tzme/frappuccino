@@ -87,7 +87,6 @@ func (r *InventoryRepository) GetByID(id string) (*models.InventoryItem, error) 
 		&item.Unit,
 		&item.MinThreshold,
 	)
-
 	if err != nil {
 		if err == sql.ErrNoRows {
 			r.logger.Warn("Inventory item not found", "item_id", id)
