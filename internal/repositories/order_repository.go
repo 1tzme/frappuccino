@@ -516,7 +516,7 @@ func (r *OrderRepository) GetInventoryRequirements(orders []*models.Order) (map[
 	for _, order := range orders {
 		for _, item := range order.Items {
 			query := `
-				SELECT mi.ingredient_id, mi.quantity
+				SELECT mi.ingredient_id, mi.required_quantity
 				FROM menu_item_ingredients mi
 				WHERE mi.menu_item_id = $1`
 
