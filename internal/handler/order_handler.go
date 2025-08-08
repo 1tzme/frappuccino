@@ -264,10 +264,10 @@ func (h *OrderHandler) CloseOrder(w http.ResponseWriter, r *http.Request) {
 // GetNumberOfOrderedItems handles GET /api/v1/orders/numberOfOrderedItems
 func (h *OrderHandler) GetNumberOfOrderedItems(w http.ResponseWriter, r *http.Request) {
 	reqCtx := &logger.RequestContext{
-		Method: r.Method,
-		Path: r.URL.Path,
+		Method:     r.Method,
+		Path:       r.URL.Path,
 		RemoteAddr: r.RemoteAddr,
-		StartTime: time.Now(),
+		StartTime:  time.Now(),
 	}
 	h.logger.LogRequest(reqCtx)
 
@@ -287,6 +287,71 @@ func (h *OrderHandler) GetNumberOfOrderedItems(w http.ResponseWriter, r *http.Re
 	}
 
 	h.writeJSONResponse(w, http.StatusOK, result)
+	reqCtx.StatusCode = http.StatusOK
+	h.logger.LogResponse(reqCtx)
+}
+
+// BatchProcessOrders handles POST /api/v1/orders/batch-process
+func (h *OrderHandler) BatchProcessOrders(w http.ResponseWriter, r *http.Request) {
+	reqCtx := &logger.RequestContext{
+		Method:     r.Method,
+		Path:       r.URL.Path,
+		RemoteAddr: r.RemoteAddr,
+		StartTime:  time.Now(),
+	}
+	h.logger.LogRequest(reqCtx)
+
+	var batchReq models.BatchOrderRequest
+	if err := h.parseRequestBody(r, &batchReq); err != nil {
+		h.logger.Warn("Invalid request body for batch process orders", "error", err)
+		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid request body")
+		reqCtx.StatusCode = http.StatusBadRequest
+		h.logger.LogResponse(reqCtx)
+		return
+	}
+
+	if len(batchReq.Orders) == 0 {
+		h.logger.Warn("Empty batch orders request")
+		h.writeErrorResponse(w, http.StatusBadRequest, "No orders provided for processing")
+		reqCtx.StatusCode = http.StatusBadRequest
+		h.logger.LogResponse(reqCtx)
+		return
+	}
+
+	if len(batchReq.Orders) > 100 {
+		h.logger.Warn("Batch size too large", "size", len(batchReq.Orders))
+		h.writeErrorResponse(w, http.StatusBadRequest, "Batch size cannot exceed 100 orders")
+		reqCtx.StatusCode = http.StatusBadRequest
+		h.logger.LogResponse(reqCtx)
+		return
+	}
+
+	response, err := h.orderService.BatchProcessOrders(batchReq)
+	if err != nil {
+		h.logger.Error("Failed to batch process orders", "error", err)
+		statusCode := http.StatusInternalServerError
+
+		if strings.Contains(err.Error(), "validation failed") {
+			statusCode = http.StatusBadRequest
+		} else if strings.Contains(err.Error(), "not found") {
+			statusCode = http.StatusNotFound
+		} else if strings.Contains(err.Error(), "insufficient inventory") {
+			statusCode = http.StatusConflict
+		}
+
+		h.writeErrorResponse(w, statusCode, err.Error())
+		reqCtx.StatusCode = statusCode
+		h.logger.LogResponse(reqCtx)
+		return
+	}
+
+	h.logger.Info("Batch processing completed",
+		"total_orders", response.Summary.TotalOrders,
+		"accepted", response.Summary.Accepted,
+		"rejected", response.Summary.Rejected,
+		"total_revenue", response.Summary.TotalRevenue)
+
+	h.writeJSONResponse(w, http.StatusOK, response)
 	reqCtx.StatusCode = http.StatusOK
 	h.logger.LogResponse(reqCtx)
 }

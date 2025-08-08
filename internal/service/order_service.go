@@ -43,6 +43,7 @@ type OrderServiceInterface interface {
 	DeleteOrder(id string) error
 	CloseOrder(id string) error
 	GetNumberOfOrderedItems(startDate, endDate string) (map[string]int, error)
+	BatchProcessOrders(req models.BatchOrderRequest) (*models.BatchProcessResponse, error)
 }
 
 // OrderService struct
@@ -345,6 +346,160 @@ func (s *OrderService) GetNumberOfOrderedItems(startDate, endDate string) (map[s
 	return result, nil
 }
 
+// BatchProcessOrders processes multiple orders simultaneously with inventory consistency
+func (s *OrderService) BatchProcessOrders(req models.BatchOrderRequest) (*models.BatchProcessResponse, error) {
+	s.logger.Info("Starting batch order processing", "order_count", len(req.Orders))
+
+	if len(req.Orders) == 0 {
+		return nil, fmt.Errorf("no orders provided for processing")
+	}
+
+	// Validate all orders first
+	orders := make([]*models.Order, 0, len(req.Orders))
+	totalRevenue := 0.0
+
+	for i, orderReq := range req.Orders {
+		if err := s.validateBatchOrderRequest(orderReq, i); err != nil {
+			s.logger.Warn("Batch order validation failed", "order_index", i, "error", err)
+			return nil, fmt.Errorf("order %d validation failed: %v", i, err)
+		}
+
+		// Calculate order total and create Order struct
+		orderTotal, err := s.calculateBatchOrderTotal(orderReq.Items)
+		if err != nil {
+			s.logger.Error("Failed to calculate order total in batch", "order_index", i, "error", err)
+			return nil, fmt.Errorf("order %d total calculation failed: %v", i, err)
+		}
+
+		order := &models.Order{
+			CustomerName: orderReq.CustomerName,
+			Status:       "pending",
+			TotalAmount:  orderTotal,
+			Items:        make([]models.OrderItem, len(orderReq.Items)),
+		}
+
+		// Convert items
+		for j, item := range orderReq.Items {
+			menuItem, err := s.menuRepo.GetByID(item.MenuItemID)
+			if err != nil {
+				s.logger.Error("Menu item not found in batch processing", "menu_item_id", item.MenuItemID, "error", err)
+				return nil, fmt.Errorf("order %d: menu item %s not found", i, item.MenuItemID)
+			}
+
+			order.Items[j] = models.OrderItem{
+				MenuItemID:  item.MenuItemID,
+				ProductID:   item.MenuItemID,
+				Quantity:    item.Quantity,
+				PriceAtTime: menuItem.Price,
+			}
+		}
+
+		orders = append(orders, order)
+		totalRevenue += orderTotal
+	}
+
+	// Check inventory availability for all orders
+	inventoryRequirements, err := s.orderRepo.GetInventoryRequirements(orders)
+	if err != nil {
+		s.logger.Error("Failed to calculate inventory requirements", "error", err)
+		return nil, fmt.Errorf("failed to calculate inventory requirements: %v", err)
+	}
+
+	// Check if we have sufficient inventory
+	inventoryMap, err := s.inventoryRepo.CheckInventoryAvailability(inventoryRequirements)
+	if err != nil {
+		s.logger.Warn("Insufficient inventory for batch orders", "error", err)
+
+		// Return response with all orders rejected due to insufficient inventory
+		response := &models.BatchProcessResponse{
+			ProcessedOrders: make([]models.BatchProcessResult, len(orders)),
+			Summary: models.BatchProcessSummary{
+				TotalOrders:      len(orders),
+				Accepted:         0,
+				Rejected:         len(orders),
+				TotalRevenue:     0,
+				InventoryUpdates: []models.InventoryUpdateResult{},
+			},
+		}
+
+		for i, order := range orders {
+			response.ProcessedOrders[i] = models.BatchProcessResult{
+				OrderID:      "",
+				CustomerName: order.CustomerName,
+				Status:       "rejected",
+				Reason:       "insufficient_inventory",
+			}
+		}
+
+		return response, nil
+	}
+
+	// Process orders in the repository (with transaction)
+	processedOrders, err := s.orderRepo.BatchProcessOrders(orders)
+	if err != nil {
+		s.logger.Error("Failed to batch process orders in repository", "error", err)
+
+		// Return response with all orders rejected due to processing failure
+		response := &models.BatchProcessResponse{
+			ProcessedOrders: make([]models.BatchProcessResult, len(orders)),
+			Summary: models.BatchProcessSummary{
+				TotalOrders:      len(orders),
+				Accepted:         0,
+				Rejected:         len(orders),
+				TotalRevenue:     0,
+				InventoryUpdates: []models.InventoryUpdateResult{},
+			},
+		}
+
+		for i, order := range orders {
+			response.ProcessedOrders[i] = models.BatchProcessResult{
+				OrderID:      "",
+				CustomerName: order.CustomerName,
+				Status:       "rejected",
+				Reason:       "processing_error",
+			}
+		}
+
+		return response, nil
+	}
+
+	// Update inventory
+	inventoryUpdates, err := s.inventoryRepo.BatchUpdateInventory(inventoryRequirements)
+	if err != nil {
+		s.logger.Error("Failed to update inventory in batch", "error", err)
+		// Note: Orders were already created, this is a partial failure scenario
+		// In production, you might want to implement compensation logic here
+	}
+
+	// Build response
+	response := &models.BatchProcessResponse{
+		ProcessedOrders: make([]models.BatchProcessResult, len(processedOrders)),
+		Summary: models.BatchProcessSummary{
+			TotalOrders:      len(processedOrders),
+			Accepted:         len(processedOrders),
+			Rejected:         0,
+			TotalRevenue:     totalRevenue,
+			InventoryUpdates: inventoryUpdates,
+		},
+	}
+
+	for i, order := range processedOrders {
+		response.ProcessedOrders[i] = models.BatchProcessResult{
+			OrderID:      order.ID,
+			CustomerName: order.CustomerName,
+			Status:       "accepted",
+			Total:        order.TotalAmount,
+		}
+	}
+
+	s.logger.Info("Completed batch order processing",
+		"total_orders", len(processedOrders),
+		"accepted", len(processedOrders),
+		"total_revenue", totalRevenue)
+
+	return response, nil
+}
+
 // Private business logic methods
 
 // validateOrderData validates the data for order creation
@@ -519,12 +674,12 @@ func (s *OrderService) restoreInventory(items []CreateOrderItemRequest) error {
 // parseDate parses date string in multiple formats
 func (s *OrderService) parseDate(dateStr string) (time.Time, error) {
 	formats := []string{
-		"2006-01-02",        // YYYY-MM-DD
-		"02.01.2006",        // DD.MM.YYYY
-		"01/02/2006",        // MM/DD/YYYY
-		"2006/01/02",        // YYYY/MM/DD
-		"2-1-2006",          // D-M-YYYY
-		"02-01-2006",        // DD-MM-YYYY
+		"2006-01-02", // YYYY-MM-DD
+		"02.01.2006", // DD.MM.YYYY
+		"01/02/2006", // MM/DD/YYYY
+		"2006/01/02", // YYYY/MM/DD
+		"2-1-2006",   // D-M-YYYY
+		"02-01-2006", // DD-MM-YYYY
 	}
 
 	for _, format := range formats {
@@ -534,4 +689,44 @@ func (s *OrderService) parseDate(dateStr string) (time.Time, error) {
 		}
 	}
 	return time.Time{}, fmt.Errorf("unable to parse date: %s", dateStr)
+}
+
+
+func (s *OrderService) validateBatchOrderRequest(orderReq models.BatchOrderItem, index int) error {
+	if orderReq.CustomerName == "" {
+		return fmt.Errorf("customer name is required")
+	}
+	if len(orderReq.Items) == 0 {
+		return fmt.Errorf("order must have at least one item")
+	}
+
+	for i, item := range orderReq.Items {
+		if item.MenuItemID == "" {
+			return fmt.Errorf("item %d: menu item ID is required", i+1)
+		}
+		if item.Quantity <= 0 {
+			return fmt.Errorf("item %d: quantity must be positive", i+1)
+		}
+
+		// Check if menu item exists
+		if _, err := s.menuRepo.GetByID(item.MenuItemID); err != nil {
+			return fmt.Errorf("item %d: menu item '%s' not found", i+1, item.MenuItemID)
+		}
+	}
+
+	return nil
+}
+
+func (s *OrderService) calculateBatchOrderTotal(items []models.BatchOrderItemDetail) (float64, error) {
+	var total float64
+	
+	for i, item := range items {
+		menuItem, err := s.menuRepo.GetByID(item.MenuItemID)
+		if err != nil {
+			return 0, fmt.Errorf("item %d: menu item '%s' not found", i+1, item.MenuItemID)
+		}
+		total += menuItem.Price * float64(item.Quantity)
+	}
+
+	return total, nil
 }

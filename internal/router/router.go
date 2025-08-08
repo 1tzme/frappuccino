@@ -92,6 +92,15 @@ func NewRouter(orderHandler *handler.OrderHandler, menuHandler *handler.MenuHand
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	})
 
+	// Batch order processing endpoint
+	mux.HandleFunc(api+"/orders/batch-process", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			orderHandler.BatchProcessOrders(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	})
+
 	// Menu collection routes: POST (create), GET (all)
 	mux.HandleFunc(api+"/menu", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {

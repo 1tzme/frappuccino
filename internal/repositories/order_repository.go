@@ -32,6 +32,8 @@ type OrderRepositoryInterface interface {
 	Delete(id string) error
 	CloseOrder(id string) error
 	GetNumberOfOrderedItems(startDate, endDate *time.Time) (map[string]int, error)
+	BatchProcessOrders(orders []*models.Order) ([]*models.Order, error)
+	GetInventoryRequirements(orders []*models.Order) (map[string]float64, error)
 }
 
 // TODO: Transition State: JSON → PostgreSQL
@@ -423,6 +425,119 @@ func (r *OrderRepository) GetNumberOfOrderedItems(startDate, endDate *time.Time)
 
 	r.logger.Info("Retrieved ordered items", "count", len(result))
 	return result, nil
+}
+
+// BatchProcessOrders processes multiple orders in a single transaction
+func (r *OrderRepository) BatchProcessOrders(orders []*models.Order) ([]*models.Order, error) {
+	r.logger.Debug("Batch processing orders", "count", len(orders))
+
+	tx, err := r.db.Begin()
+	if err != nil {
+		r.logger.Error("Failed to begin batch transaction", "error", err)
+		return nil, fmt.Errorf("failed to begin transaction: %v", err)
+	}
+	defer tx.Rollback()
+
+	processedOrders := make([]*models.Order, len(orders))
+
+	for i, order := range orders {
+		if err := r.validateOrder(order); err != nil {
+			r.logger.Error("Failed to validate order in batch", "error", err, "customer", order.CustomerName)
+			return nil, fmt.Errorf("order %d validation failed: %v", i, err)
+		}
+
+		query := `
+			INSERT INTO orders (customer_name, status, total_amount, special_instructions)
+			VALUES ($1, $2, $3, $4)
+			RETURNING id, created_at, updated_at`
+
+		var generatedID string
+		var createdAt, updatedAt time.Time
+
+		err = tx.QueryRow(query, order.CustomerName, order.Status, order.TotalAmount, order.SpecialInstructions).Scan(&generatedID, &createdAt, &updatedAt)
+		if err != nil {
+			r.logger.Error("Failed to insert order in batch", "error", err, "customer", order.CustomerName)
+			return nil, fmt.Errorf("failed to insert order %d: %v", i, err)
+		}
+
+		order.ID = generatedID
+		order.CreatedAt = createdAt
+		order.UpdatedAt = updatedAt
+
+		if len(order.Items) > 0 {
+			itemQuery := `
+				INSERT INTO order_items (order_id, menu_item_id, quantity, price_at_time, customizations)
+				VALUES ($1, $2, $3, $4, $5)
+				RETURNING id`
+
+			for j, item := range order.Items {
+				itemID := ""
+				err := tx.QueryRow(itemQuery, order.ID, item.MenuItemID, item.Quantity, item.PriceAtTime, item.Customizations).Scan(&itemID)
+				if err != nil {
+					r.logger.Error("Failed to insert order item in batch", "error", err, "order_id", order.ID, "menu_item_id", item.MenuItemID)
+					return nil, fmt.Errorf("failed to insert order item for order %d: %v", i, err)
+				}
+				order.Items[j].ID = itemID
+				order.Items[j].OrderID = order.ID
+			}
+		}
+
+		processedOrders[i] = order
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		r.logger.Error("Failed to commit batch transaction", "error", err)
+		return nil, fmt.Errorf("failed to commit batch transaction: %v", err)
+	}
+
+	r.logger.Info("Batch processed orders", "count", len(processedOrders))
+	return processedOrders, nil
+}
+
+// GetInventoryRequirements calculates total ingredient requirements for multiple orders
+func (r *OrderRepository) GetInventoryRequirements(orders []*models.Order) (map[string]float64, error) {
+	r.logger.Debug("Calculating inventory requirements for batch orders", "count", len(orders))
+
+	requirements := make(map[string]float64)
+
+	for _, order := range orders {
+		for _, item := range order.Items {
+			query := `
+				SELECT mi.ingredient_id, mi.quantity
+				FROM menu_item_ingredients mi
+				WHERE mi.menu_item_id = $1`
+
+			rows, err := r.db.Query(query, item.MenuItemID)
+			if err != nil {
+				r.logger.Error("Failed to query ingredient requirements", "error", err, "menu_item_id", item.MenuItemID)
+				return nil, fmt.Errorf("failed to query ingredient requirements: %v", err)
+			}
+			defer rows.Close()
+
+			for rows.Next() {
+				var ingredientID string
+				var quantity float64
+				
+				err := rows.Scan(&ingredientID, &quantity)
+				if err != nil {
+					r.logger.Error("Failed to scan ingredient requirement", "error", err)
+					return nil, fmt.Errorf("failed to scan ingredient requirement: %v", err)
+				}
+
+				totalNeeded := quantity * float64(item.Quantity)
+				requirements[ingredientID] += totalNeeded
+			}
+
+			if err = rows.Err(); err != nil {
+				r.logger.Error("Error iterating ingredient requirements", "error", err)
+				return nil, fmt.Errorf("error iterating ingredient requirements: %v", err)
+			}
+		}
+	}
+
+	r.logger.Info("Calculated inventory requirements", "ingredient_count", len(requirements))
+	return requirements, nil
 }
 
 // TODO: Transition State: JSON → PostgreSQL
