@@ -9,12 +9,22 @@ package service
 // 5. Implement efficient pagination and filtering for large datasets
 
 import (
+	"errors"
 	"sort"
+	"strconv"
+	"strings"
 
 	"frappuccino/internal/repositories"
 	"frappuccino/models"
 	"frappuccino/pkg/logger"
 )
+
+type AggregationServiceInterface interface {
+	GetTotalSales() (*TotalSales, error)
+	GetPopularItems() ([]PopularItem, error)
+	SearchFullText(req SearchRequest) (*repositories.SearchResult, error)
+	GetOrderedItemsByPeriod(req OrderedItemsByPeriodRequest) (*repositories.OrderedItemsByPeriodResult, error)
+}
 
 type TotalSales struct {
 	TotalRevenue float64    `json:"total_revenue"`
@@ -33,9 +43,17 @@ type PopularItem struct {
 	SalesCount int `json:"sales_count"`
 }
 
-type AggregationServiceInterface interface {
-	GetTotalSales() (*TotalSales, error)
-	GetPopularItems() ([]PopularItem, error)
+type SearchRequest struct {
+	Query    string   `json:"query"`
+	Filters  []string `json:"filters"`
+	MinPrice *float64 `json:"min_price"`
+	MaxPrice *float64 `json:"max_price"`
+}
+
+type OrderedItemsByPeriodRequest struct {
+	Period string `json:"period"`
+	Month  string `json:"month"`
+	Year   string `json:"year"`
 }
 
 type AggregationService struct {
@@ -142,4 +160,110 @@ func (s *AggregationService) GetPopularItems() ([]PopularItem, error) {
 
 	s.logger.Info("Popular items report calculated successfully", "item_count", len(popularItems))
 	return popularItems, nil
+}
+
+func (s *AggregationService) SearchFullText(req SearchRequest) (*repositories.SearchResult, error) {
+	s.logger.Info("Processing full text search request", "query", req.Query, "filters", req.Filters)
+
+	if err := s.validateSearchRequest(req); err != nil {
+		s.logger.Warn("Invalid search request", "error", err)
+		return nil, err
+	}
+
+	result, err := s.aggregationRepo.SearchFullText(req.Query, req.Filters, req.MinPrice, req.MaxPrice)
+	if err != nil {
+		s.logger.Error("Failed to perform full text search", "error", err)
+		return nil, err
+	}
+
+	s.logger.Info("Full text search completed successfully", "total_matches", result.TotalMatches)
+	return result, nil
+}
+
+func (s *AggregationService) GetOrderedItemsByPeriod(req OrderedItemsByPeriodRequest) (*repositories.OrderedItemsByPeriodResult, error) {
+	s.logger.Info("Processing ordered items by period request", "period", req.Period, "month", req.Month, "year", req.Year)
+
+	if err := s.validatePeriodRequest(req); err != nil {
+		s.logger.Warn("Invalid period request", "error", err)
+		return nil, err
+	}
+
+	result, err := s.aggregationRepo.GetOrderedItemsByPeriod(req.Period, req.Month, req.Year)
+	if err != nil {
+		s.logger.Error("Failed to get ordered items by period", "error", err)
+		return nil, err
+	}
+
+	s.logger.Info("Ordered items by period retrieved successfully", "period", req.Period, "items_count", len(result.OrderedItems))
+	return result, nil
+}
+
+// validation functions
+func (s *AggregationService) validateSearchRequest(req SearchRequest) error {
+	if strings.TrimSpace(req.Query) == "" {
+		return errors.New("search query cannot be empty")
+	}
+
+	if len(req.Query) > 255 {
+		return errors.New("search query is too long (max 255 characters)")
+	}
+
+	validFilters := []string{"orders", "menu", "all"}
+	for _, filter := range req.Filters {
+		if !contains(validFilters, filter) {
+			return errors.New("invalid search filter (allowed: orders, menu, all)")
+		}
+	}
+
+	if req.MinPrice != nil && *req.MinPrice < 0 {
+		return errors.New("minimum price cannot be negative")
+	}
+
+	if req.MaxPrice != nil && *req.MaxPrice < 0 {
+		return errors.New("maximum price cannot be negative")
+	}
+
+	if req.MinPrice != nil && req.MaxPrice != nil && *req.MinPrice > *req.MaxPrice {
+		return errors.New("minimum price cannot be greater than maximum price")
+	}
+
+	return nil
+}
+
+func (s *AggregationService) validatePeriodRequest(req OrderedItemsByPeriodRequest) error {
+	if req.Period != "day" && req.Period != "month" {
+		return errors.New("invalid period (allowed: day, month)")
+	}
+
+	if req.Period == "day" {
+		if req.Month == "" {
+			return errors.New("month is required when period is 'day'")
+		}
+
+		validMonths := []string{
+			"january", "february", "march", "april", "may", "june",
+			"july", "august", "september", "october", "november", "december",
+		}
+
+		if !contains(validMonths, strings.ToLower(req.Month)) {
+			return errors.New("invalid month name")
+		}
+	}
+
+	if req.Period == "month" && req.Year != "" {
+		if year, err := strconv.Atoi(req.Year); err != nil || year < 2000 || year > 2100 {
+			return errors.New("invalid year (must be between 2000 and 2100)")
+		}
+	}
+
+	return nil
+}
+
+func contains(slice []string, item string) bool {
+	for _, s := range slice {
+		if strings.EqualFold(s, item) {
+			return true
+		}
+	}
+	return false
 }

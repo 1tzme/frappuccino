@@ -31,6 +31,7 @@ type OrderRepositoryInterface interface {
 	Update(id string, order *models.Order) error
 	Delete(id string) error
 	CloseOrder(id string) error
+	GetNumberOfOrderedItems(startDate, endDate *time.Time) (map[string]int, error)
 }
 
 // TODO: Transition State: JSON → PostgreSQL
@@ -371,6 +372,57 @@ func (r *OrderRepository) CloseOrder(id string) error {
 
 	r.logger.Info("Closed order", "order_id", id)
 	return nil
+}
+
+// GetNumberOfOrderedItems retrieves number of ordered items count by date interval
+func (r *OrderRepository) GetNumberOfOrderedItems(startDate, endDate *time.Time) (map[string]int, error) {
+	r.logger.Debug("Retrieving number of ordered items", "startDate", startDate, "endDate", endDate)
+
+	query := `SELECT mi.name, SUM(oi.quantity) as total_quantity
+		FROM order_items oi
+		JOIN orders o ON oi.order_id = o.id
+		JOIN menu_items mi ON oi.menu_item_id = mi.id
+		WHERE ($1::timestamp IS NULL OR o.created_at >= $1)
+		AND ($2::timestamp IS NULL OR o.created_at <= $2)
+		GROUP BY mi.name
+		ORDER BY mi.name`
+
+	var startDateParam, endDateParam interface{}
+	if startDate != nil {
+		startDateParam = *startDate
+	}
+	if endDate != nil {
+		endDateParam = *endDate
+	}
+
+	rows, err := r.db.Query(query, startDateParam, endDateParam)
+	if err != nil {
+		r.logger.Error("Failed to query ordered items", "error", err)
+		return nil, fmt.Errorf("failed to query ordered items: %v", err)
+	}
+	defer rows.Close()
+
+	result := make(map[string]int)
+
+	for rows.Next() {
+		itemName := ""
+		quantity := 0
+		err := rows.Scan(&itemName, &quantity)
+		if err != nil {
+			r.logger.Error("Failed to scan ordered item", "error", err)
+			return nil, fmt.Errorf("failed to scan ordered item: %v", err)
+		}
+		result[itemName] = quantity
+	}
+
+	err = rows.Err()
+	if err != nil {
+		r.logger.Error("Error iterating ordered items", "error", err)
+		return nil, fmt.Errorf("error iterating ordered items: %v", err)
+	}
+
+	r.logger.Info("Retrieved ordered items", "count", len(result))
+	return result, nil
 }
 
 // TODO: Transition State: JSON → PostgreSQL

@@ -42,6 +42,7 @@ type OrderServiceInterface interface {
 	UpdateOrder(id string, req UpdateOrderRequest) error
 	DeleteOrder(id string) error
 	CloseOrder(id string) error
+	GetNumberOfOrderedItems(startDate, endDate string) (map[string]int, error)
 }
 
 // OrderService struct
@@ -302,6 +303,48 @@ func (s *OrderService) CloseOrder(id string) error {
 	return nil
 }
 
+// GetNumberOfOrderedItems returns count of ordered items in date interval
+func (s *OrderService) GetNumberOfOrderedItems(startDate, endDate string) (map[string]int, error) {
+	s.logger.Info("Getting number of ordered items", "startDate", startDate, "endDate", endDate)
+
+	var parsedStartDate, parsedEndDate *time.Time
+
+	if startDate != "" {
+		parsedDate, err := s.parseDate(startDate)
+		if err != nil {
+			s.logger.Error("Invalid start date format", "startDate", startDate, "error", err)
+			return nil, fmt.Errorf("invalid start date format: %v", err)
+		}
+		parsedStartDate = &parsedDate
+	}
+
+	if endDate != "" {
+		parsedDate, err := s.parseDate(endDate)
+		if err != nil {
+			s.logger.Warn("Invalid end date format", "endDate", endDate, "error", err)
+			return nil, fmt.Errorf("invalid end date format: %v", err)
+		}
+		endOfDay := time.Date(parsedDate.Year(), parsedDate.Month(), parsedDate.Day(), 23, 59, 59, 999999999, parsedDate.Location())
+		parsedEndDate = &endOfDay
+	}
+
+	if parsedStartDate != nil && parsedEndDate != nil {
+		if parsedStartDate.After(*parsedEndDate) {
+			s.logger.Warn("Start date is after end date", "startDate", startDate, "endDate", endDate)
+			return nil, fmt.Errorf("start date cannot be after end date")
+		}
+	}
+
+	result, err := s.orderRepo.GetNumberOfOrderedItems(parsedStartDate, parsedEndDate)
+	if err != nil {
+		s.logger.Error("Failed to get ordered items from repository", "error", err)
+		return nil, fmt.Errorf("failed to get ordered items: %v", err)
+	}
+
+	s.logger.Info("Retrieved ordered items count", "items_count", len(result))
+	return result, nil
+}
+
 // Private business logic methods
 
 // validateOrderData validates the data for order creation
@@ -471,4 +514,24 @@ func (s *OrderService) restoreInventory(items []CreateOrderItemRequest) error {
 		}
 	}
 	return nil
+}
+
+// parseDate parses date string in multiple formats
+func (s *OrderService) parseDate(dateStr string) (time.Time, error) {
+	formats := []string{
+		"2006-01-02",        // YYYY-MM-DD
+		"02.01.2006",        // DD.MM.YYYY
+		"01/02/2006",        // MM/DD/YYYY
+		"2006/01/02",        // YYYY/MM/DD
+		"2-1-2006",          // D-M-YYYY
+		"02-01-2006",        // DD-MM-YYYY
+	}
+
+	for _, format := range formats {
+		parsed, err := time.Parse(format, dateStr)
+		if err == nil {
+			return parsed, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("unable to parse date: %s", dateStr)
 }
