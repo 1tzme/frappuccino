@@ -75,7 +75,7 @@ func (r *OrderRepository) Add(order *models.Order) error {
 
 	query := `
 		INSERT INTO orders (customer_name, status, total_amount, special_instructions)
-		VALUES ($1, $2, %3, %4)
+		VALUES ($1, $2, $3, $4)
 		RETURNING id, created_at, updated_at`
 
 	generatedID := ""
