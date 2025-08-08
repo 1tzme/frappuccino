@@ -381,9 +381,8 @@ func (r *AggregationRepository) getOrderedItemsByDay(month string, result *Order
 	query := `
 		SELECT 
 			EXTRACT(DAY FROM o.created_at) as day,
-			SUM(oi.quantity) as total_items
+			COUNT(DISTINCT o.id) as order_count
 		FROM orders o
-		JOIN order_items oi ON o.id = oi.order_id
 		WHERE EXTRACT(MONTH FROM o.created_at) = $1 
 		  AND EXTRACT(YEAR FROM o.created_at) = $2
 		  AND o.status = 'closed'
@@ -399,13 +398,13 @@ func (r *AggregationRepository) getOrderedItemsByDay(month string, result *Order
 
 	dayMap := make(map[int]int)
 	for rows.Next() {
-		var day, totalItems int
-		err := rows.Scan(&day, &totalItems)
+		var day, orderCount int
+		err := rows.Scan(&day, &orderCount)
 		if err != nil {
 			r.logger.Error("Failed to scan day result", "error", err)
 			continue
 		}
-		dayMap[day] = totalItems
+		dayMap[day] = orderCount
 	}
 
 	daysInMonth := getDaysInMonth(monthNum, currentYear)
@@ -427,9 +426,8 @@ func (r *AggregationRepository) getOrderedItemsByMonth(year string, result *Orde
 	query := `
 		SELECT 
 			EXTRACT(MONTH FROM o.created_at) as month,
-			SUM(oi.quantity) as total_items
+			COUNT(DISTINCT o.id) as order_count
 		FROM orders o
-		JOIN order_items oi ON o.id = oi.order_id
 		WHERE EXTRACT(YEAR FROM o.created_at) = $1
 		  AND o.status = 'closed'
 		GROUP BY EXTRACT(MONTH FROM o.created_at)
@@ -444,13 +442,13 @@ func (r *AggregationRepository) getOrderedItemsByMonth(year string, result *Orde
 
 	monthMap := make(map[int]int)
 	for rows.Next() {
-		var month, totalItems int
-		err := rows.Scan(&month, &totalItems)
+		var month, orderCount int
+		err := rows.Scan(&month, &orderCount)
 		if err != nil {
 			r.logger.Error("Failed to scan month result", "error", err)
 			continue
 		}
-		monthMap[month] = totalItems
+		monthMap[month] = orderCount
 	}
 
 	monthNames := []string{"january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"}
@@ -487,7 +485,7 @@ func parseMonth(month string) (int, error) {
 		"may": 5, "june": 6, "july": 7, "august": 8,
 		"september": 9, "october": 10, "november": 11, "december": 12,
 	}
-	
+
 	if num, ok := monthMap[strings.ToLower(month)]; ok {
 		return num, nil
 	}
